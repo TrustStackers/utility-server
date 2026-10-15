@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VTNs &amp; Nested Communities — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>🕸️ Verified Trust Networks (VTNs) &amp; Nested Communities</h1>
+      <p>Scenario 9. A VTN groups member VTCs under a shared umbrella — e.g. a regional network of co-ops, or a
+        professional association of chapters — while also being able to admit unaligned individual members
+        directly. Effective policy for a person is resolved by walking up the hierarchy via
+        <code>parent_community_id</code>. Talks to the real <code>/vtcs</code>,
+        <code>/vtcs/:id/affiliate</code>, <code>/vtcs/:id/unaffiliate</code>, <code>/vtns/:id/hierarchy</code>,
+        and <code>/identities/:id/effective-policy</code> endpoints.</p>
+    </div>
+  </div>
+
+  <div class="container section">
+    <p><a href="index.html">&larr; Back to dashboard</a> · <a href="vtc-create.html">Create a VTC/VTN &rarr;</a></p>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div class="two-col">
+      <div>
+        <div class="card">
+          <h3>Affiliate a VTC with a VTN</h3>
+          <div class="field">
+            <label for="child-vtc-select">Member VTC</label>
+            <select id="child-vtc-select"></select>
+          </div>
+          <div class="field">
+            <label for="parent-vtn-select">Parent VTN</label>
+            <select id="parent-vtn-select"></select>
+          </div>
+          <button class="btn btn-primary btn-sm" id="affiliate-btn">Affiliate &rarr;</button>
+          <button class="btn btn-outline btn-sm" id="unaffiliate-btn">Unaffiliate Selected VTC</button>
+          <div id="affiliate-result" class="mt-md"></div>
+        </div>
+
+        <div class="card">
+          <h3>Check Effective Policy</h3>
+          <p class="text-muted" style="font-size:0.85rem;">Resolve an identity's merged policy by walking its
+            community membership(s) up through any parent VTN (VTN sets the floor; a VTC may only tighten it).</p>
+          <div class="field">
+            <label for="policy-identity-id">Identity ID</label>
+            <input type="text" id="policy-identity-id" placeholder="e.g. 12">
+          </div>
+          <button class="btn btn-outline btn-sm" id="check-policy-btn">Resolve Effective Policy</button>
+          <div id="policy-result" class="mt-md"></div>
+        </div>
+
+        <div class="card" id="network-rules">
+          <h3>Network Rules</h3>
+          <p class="text-muted" style="font-size:0.85rem;">Governance rules for a VTN. Only VTN
+            admins/founding admins may view or propose changes. A change is <strong>applied only once the
+            required admins co-sign &mdash; from their agent apps</strong> (this server never holds member keys).</p>
+          <div class="field">
+            <label for="rules-vtn-select">VTN</label>
+            <select id="rules-vtn-select"></select>
+          </div>
+          <div id="rules-current" class="mt-sm text-muted">Select a VTN you administer.</div>
+
+          <div id="rules-editor" style="display:none; margin-top:12px;">
+            <div class="field">
+              <label for="rules-th-m">Approver threshold (M)</label>
+              <input type="number" min="1" id="rules-th-m">
+            </div>
+            <div class="field">
+              <label for="rules-th-n">Admin count (N)</label>
+              <input type="number" min="1" id="rules-th-n">
+            </div>
+            <div class="field">
+              <label for="rules-scope">Who must approve</label>
+              <select id="rules-scope">
+                <option value="admins">All admins (default)</option>
+                <option value="members">A number of members</option>
+                <option value="all_members">All members</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="rules-min">Members required (if "a number of members")</label>
+              <input type="number" min="1" id="rules-min" value="2">
+            </div>
+            <button class="btn btn-primary btn-sm" id="rules-propose-btn">Propose change</button>
+            <div id="rules-propose-result" class="mt-md"></div>
+          </div>
+
+          <div id="rules-pending" class="mt-md"></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h3>Network Hierarchy</h3>
+          <div id="hierarchy-view"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">P2P Trust Stack — utility-server UI</div>
+  </footer>
+
+  <script>
+    let allVtcs = [];
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    function showError(message) {
+      const el = document.getElementById('error');
+      el.style.display = 'block';
+      el.textContent = message;
+    }
+
+    function clearError() {
+      document.getElementById('error').style.display = 'none';
+    }
+
+    async function loadAll() {
+      clearError();
+      try {
+        const res = await fetch('/vtcs');
+        if (!res.ok) throw new Error(`GET /vtcs failed: ${res.status}`);
+        allVtcs = await res.json();
+        renderSelectors();
+        await renderHierarchy();
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    function renderSelectors() {
+      const childSelect = document.getElementById('child-vtc-select');
+      const parentSelect = document.getElementById('parent-vtn-select');
+
+      const vtcs = allVtcs.filter((v) => v.identity.role === 'vtc');
+      const vtns = allVtcs.filter((v) => v.identity.role === 'vtn');
+
+      childSelect.innerHTML = vtcs.length
+        ? vtcs.map((v) => {
+            const parentLabel = v.governance?.parentCommunityUuid
+              ? ` (affiliated with #${v.governance.parentCommunityUuid})`
+              : '';
+            return `<option value="${v.identity.uuid}">${escapeHtml(v.identity.name || '(unnamed)')} #${v.identity.uuid}${parentLabel}</option>`;
+          }).join('')
+        : '<option value="">No VTCs yet — create one first</option>';
+
+      parentSelect.innerHTML = vtns.length
+        ? vtns.map((v) => `<option value="${v.identity.uuid}">${escapeHtml(v.identity.name || '(unnamed)')} #${v.identity.uuid}</option>`).join('')
+        : '<option value="">No VTNs yet — create one first</option>';
+
+      // Network Rules panel — a VTN picker (access is enforced server-side: only admins).
+      const rulesSelect = document.getElementById('rules-vtn-select');
+      if (rulesSelect) {
+        rulesSelect.innerHTML = vtns.length
+          ? vtns.map((v) => `<option value="${v.identity.uuid}">${escapeHtml(v.identity.name || '(unnamed)')}</option>`).join('')
+          : '<option value="">No VTNs yet</option>';
+        loadVtnRules();
+      }
+    }
+
+    document.getElementById('affiliate-btn').addEventListener('click', async function () {
+      clearError();
+      const childId = document.getElementById('child-vtc-select').value;
+      const parentId = document.getElementById('parent-vtn-select').value;
+      if (!childId || !parentId) {
+        document.getElementById('affiliate-result').innerHTML =
+          '<div class="explainer">Select both a VTC and a VTN.</div>';
+        return;
+      }
+      try {
+        const res = await fetch(`/vtcs/${childId}/affiliate`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ parentCommunityUuid: parentId }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error?.message || `affiliate failed: ${res.status}`);
+        document.getElementById('affiliate-result').innerHTML = `
+          <div class="explainer">✅ <strong>${escapeHtml(body.child.name)}</strong> is now affiliated with
+          VTN #${body.childGovernance.parentCommunityUuid}. Its members now fall under the VTN's effective policy
+          scope.</div>
+        `;
+        await loadAll();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    document.getElementById('unaffiliate-btn').addEventListener('click', async function () {
+      clearError();
+      const childId = document.getElementById('child-vtc-select').value;
+      if (!childId) {
+        document.getElementById('affiliate-result').innerHTML =
+          '<div class="explainer">Select a VTC to unaffiliate.</div>';
+        return;
+      }
+      try {
+        const res = await fetch(`/vtcs/${childId}/unaffiliate`, { method: 'POST' });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error?.message || `unaffiliate failed: ${res.status}`);
+        document.getElementById('affiliate-result').innerHTML = `
+          <div class="explainer">🔓 <strong>${escapeHtml(body.child.name)}</strong> is no longer affiliated with
+          any VTN.</div>
+        `;
+        await loadAll();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    document.getElementById('check-policy-btn').addEventListener('click', async function () {
+      clearError();
+      const identityId = document.getElementById('policy-identity-id').value.trim();
+      const resultEl = document.getElementById('policy-result');
+      if (!identityId) {
+        resultEl.innerHTML = '<div class="explainer">Enter an identity ID.</div>';
+        return;
+      }
+      try {
+        const res = await fetch(`/identities/${identityId}/effective-policy`);
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error?.message || `effective-policy failed: ${res.status}`);
+
+        const levelsHtml = body.levels.length
+          ? body.levels.map((lvl) => `
+              <div class="entity-row">
+                <div>
+                  <div class="name">${lvl.communityRole === 'vtn' ? '🕸️' : '🏛️'} ${escapeHtml(lvl.communityName || '(unnamed)')} <span class="badge">${lvl.communityRole}</span></div>
+                  <div class="meta">allowedClaimTypes: ${lvl.allowedClaimTypes ? escapeHtml(lvl.allowedClaimTypes.join(', ')) : 'unrestricted'}</div>
+                </div>
+              </div>
+            `).join('')
+          : '<p class="text-muted">No active community memberships.</p>';
+
+        resultEl.innerHTML = `
+          <div class="explainer">
+            <strong>Policy chain (outermost/VTN-floor first):</strong>
+            ${levelsHtml}
+            <p class="mt-sm"><strong>Effective allowedClaimTypes:</strong> ${body.effectiveAllowedClaimTypes ? escapeHtml(body.effectiveAllowedClaimTypes.join(', ')) : 'unrestricted'}</p>
+          </div>
+        `;
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    async function renderHierarchy() {
+      const el = document.getElementById('hierarchy-view');
+      const vtns = allVtcs.filter((v) => v.identity.role === 'vtn');
+      if (vtns.length === 0) {
+        el.innerHTML = '<p class="text-muted">No VTNs yet. Create one on the <a href="vtc-create.html">Create a VTC</a> page to see nested communities here.</p>';
+        return;
+      }
+
+      try {
+        const cards = await Promise.all(vtns.map(async (v) => {
+          const res = await fetch(`/vtns/${v.identity.uuid}/hierarchy`);
+          if (!res.ok) throw new Error(`GET /vtns/:id/hierarchy failed: ${res.status}`);
+          const h = await res.json();
+          return renderVtnCard(h);
+        }));
+        el.innerHTML = cards.join('');
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    function renderVtnCard(h) {
+      const gov = h.governance;
+      const thresholdLabel = gov && gov.adminThresholdM != null
+        ? `M=${gov.adminThresholdM}/${gov.adminThresholdN} admins`
+        : 'no governance threshold set';
+
+      const childrenHtml = h.childVtcs.length
+        ? h.childVtcs.map((c) => `
+            <div class="entity-row" style="padding-left:1rem;">
+              <span class="name">🏛️ ${escapeHtml(c.identity.name || '(unnamed)')} <span class="meta">#${c.identity.uuid}</span></span>
+              <span class="spacer"></span>
+              <span class="meta">${c.activeMemberCount} members</span>
+            </div>
+          `).join('')
+        : '<p class="text-muted" style="font-size:0.8rem; padding-left:1rem;">None yet</p>';
+
+      const directHtml = h.directMemberships.length
+        ? h.directMemberships.map((m) => `
+            <div class="entity-row" style="padding-left:1rem;">
+              <span class="name">Identity #${m.memberIdentityUuid}</span>
+              <span class="spacer"></span>
+              <span class="meta">${escapeHtml(m.role || 'member')}</span>
+            </div>
+          `).join('')
+        : '<p class="text-muted" style="font-size:0.8rem; padding-left:1rem;">None yet</p>';
+
+      return `
+        <div class="card" style="background:#12233d;border-color:#1e3a5f;">
+          <h3>🕸️ ${escapeHtml(h.vtn.name || '(unnamed)')} #${h.vtn.uuid} <span class="badge" style="background:#1e3a5f;color:#93c5fd;">VTN</span></h3>
+          <p class="text-muted" style="font-size:0.85rem;">${thresholdLabel}</p>
+          <div class="mt-sm">
+            <strong style="font-size:0.85rem;">Member VTCs (${h.childVtcs.length}):</strong>
+            ${childrenHtml}
+          </div>
+          <div class="mt-sm">
+            <strong style="font-size:0.85rem;">Direct Individual Members (${h.directMemberships.length}):</strong>
+            ${directHtml}
+          </div>
+        </div>
+      `;
+    }
+
+    // ── Network Rules (VTN governance) ──────────────────────────────────────
+    // Access is enforced server-side (only VTN admins). The UI PROPOSES + monitors;
+    // the required admins co-sign from their agent apps (the server holds no keys).
+
+    async function loadVtnRules() {
+      const select = document.getElementById('rules-vtn-select');
+      const current = document.getElementById('rules-current');
+      const editor = document.getElementById('rules-editor');
+      const pendingEl = document.getElementById('rules-pending');
+      const vtnUuid = select ? select.value : '';
+      editor.style.display = 'none';
+      pendingEl.innerHTML = '';
+      if (!vtnUuid) { current.textContent = 'No VTN selected.'; return; }
+      try {
+        const res = await fetch(`/vtns/${vtnUuid}/governance`);
+        const body = await res.json();
+        if (res.status === 401) { current.innerHTML = '<span class="text-muted">Sign in to the utility server to manage network rules.</span>'; return; }
+        if (res.status === 403) { current.innerHTML = '<span class="text-muted">You are not an admin of this VTN.</span>'; return; }
+        if (!res.ok) throw new Error(body?.error?.message || `failed: ${res.status}`);
+
+        const g = body.governance || {};
+        current.innerHTML = `
+          <div><strong>Approver threshold (M):</strong> ${g.adminThresholdM ?? '—'} admins</div>
+          <div><strong>Admin count (N):</strong> ${g.adminThresholdN ?? '—'} admins</div>
+          <div><strong>Allowed credential types:</strong> ${(g.allowedClaimTypes && g.allowedClaimTypes.length) ? escapeHtml(g.allowedClaimTypes.join(', ')) : '— (none declared)'}</div>
+        `;
+        document.getElementById('rules-th-m').value = g.adminThresholdM ?? '';
+        document.getElementById('rules-th-n').value = g.adminThresholdN ?? '';
+        editor.style.display = 'block';
+
+        const pending = body.pending || [];
+        pendingEl.innerHTML = pending.length
+          ? '<strong style="font-size:0.85rem;">Pending changes (applied on quorum of admin co-signatures):</strong>' +
+            pending.map((p) => `
+              <div class="entity-row" style="flex-direction:column; align-items:flex-start;">
+                <div class="meta">scope <span class="badge">${escapeHtml(p.scope)}</span> · needs ${p.requiredApproverCount} approval(s) · approved by ${p.approvedBy.length}</div>
+                <pre class="meta" style="white-space:pre-wrap;">${escapeHtml(JSON.stringify(p.change, null, 2))}</pre>
+              </div>`).join('')
+          : '<p class="text-muted" style="font-size:0.85rem;">No pending changes.</p>';
+      } catch (err) {
+        current.innerHTML = `<span class="text-muted">Could not load rules: ${escapeHtml(err.message)}</span>`;
+      }
+    }
+
+    async function proposeVtnRule() {
+      const vtnUuid = document.getElementById('rules-vtn-select').value;
+      const result = document.getElementById('rules-propose-result');
+      if (!vtnUuid) { result.innerHTML = '<div class="explainer">Select a VTN.</div>'; return; }
+      const change = {};
+      const m = parseInt(document.getElementById('rules-th-m').value, 10);
+      const n = parseInt(document.getElementById('rules-th-n').value, 10);
+      if (!isNaN(m)) change.adminThresholdM = m;
+      if (!isNaN(n)) change.adminThresholdN = n;
+      if (Object.keys(change).length === 0) { result.innerHTML = '<div class="explainer">Set at least one value.</div>'; return; }
+      const scope = document.getElementById('rules-scope').value;
+      const minApprovals = scope === 'members' ? parseInt(document.getElementById('rules-min').value, 10) : undefined;
+      try {
+        const res = await fetch(`/vtns/${vtnUuid}/governance/propose`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ change, scope, minApprovals }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error?.message || `propose failed: ${res.status}`);
+        result.innerHTML = '<div class="explainer">✅ Proposed. The required admins co-sign from their agent apps; the change applies on quorum.</div>';
+        await loadVtnRules();
+      } catch (err) {
+        result.innerHTML = `<div class="explainer">✗ ${escapeHtml(err.message)}</div>`;
+      }
+    }
+
+    document.getElementById('rules-vtn-select').addEventListener('change', loadVtnRules);
+    document.getElementById('rules-propose-btn').addEventListener('click', proposeVtnRule);
+
+    loadAll();
+  </script>
+
+</body>
+
+</html>

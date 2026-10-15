@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create a VTC — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>🏛️ Create a Verified Trust Community (VTC)</h1>
+      <p>A VTC is itself an identity (<code>identities.role='vtc'</code>, <code>subject_kind</code> NULL — it's a
+        governance construct, not a subject). It is governed by a set of founding admins under an M-of-N co-signing
+        threshold recorded in <code>governance</code>. Founding admins become <code>memberships</code> rows
+        (<code>role='founding_admin'</code>, <code>status='active'</code>), and a <code>status_lists</code> row
+        (<code>purpose='revocation'</code>) is minted alongside it, with reserved decoy indices 0–3 pre-flipped so a
+        new community's first real member isn't identifiable by slot position.</p>
+    </div>
+  </div>
+
+  <div class="container section">
+    <p><a href="index.html">&larr; Back to dashboard</a> · <a href="vtc-invite-join.html">Invite &amp; Join a VTC &rarr;</a> · <a href="vtc-manage.html">Manage a VTC &rarr;</a></p>
+
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div class="two-col" style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+      <div style="flex:1; min-width:340px;">
+        <div class="card">
+          <h3>New VTC / VTN</h3>
+          <form id="vtc-form">
+
+            <!-- Step 1: Governance Construct Type -->
+            <div class="wizard-step" id="step-1">
+              <div class="field">
+                <label for="vtc-kind">Governance Construct Type</label>
+                <select id="vtc-kind">
+                  <option value="vtc">VTC — Verified Trust Community</option>
+                  <option value="vtn">VTN — Verified Trust Network (umbrella for multiple VTCs)</option>
+                </select>
+                <div class="hint" id="kind-hint">A VTC governs a specific trust domain. A VTN is an umbrella that groups multiple VTCs.</div>
+              </div>
+              <button type="button" class="btn btn-primary" onclick="nextStep(2)">Next →</button>
+            </div>
+
+            <!-- Step 2: Community Name -->
+            <div class="wizard-step" id="step-2" style="display:none;">
+              <div class="field">
+                <label for="vtc-name">Community Name</label>
+                <input type="text" id="vtc-name" placeholder="e.g. Riverside Book Club" required>
+              </div>
+              <div style="display:flex; gap:0.5rem;">
+                <button type="button" class="btn btn-outline" onclick="prevStep(1)">← Back</button>
+                <button type="button" class="btn btn-primary" onclick="nextStep(3)">Next →</button>
+              </div>
+            </div>
+
+            <!-- Step 3: Founding Admins & Threshold -->
+            <div class="wizard-step" id="step-3" style="display:none;">
+              <div class="field">
+                <label>Founding Admins (human VTAs with personhood)</label>
+                <div id="admin-checklist"></div>
+                <div class="hint" id="admin-hint">Select at least <span id="admin-min-count">2</span> human VTA(s) with personhood-asserted relationships.</div>
+              </div>
+              <div class="field">
+                <label for="vtc-threshold">Signature Threshold (M of N)</label>
+                <input type="number" id="vtc-threshold" min="2" value="2">
+                <div class="hint">Number of admin signatures required to authorize actions.</div>
+              </div>
+              <div style="display:flex; gap:0.5rem;">
+                <button type="button" class="btn btn-outline" onclick="prevStep(2)">← Back</button>
+                <button type="button" class="btn btn-primary" id="create-btn" onclick="submitForm()">Create Community →</button>
+              </div>
+            </div>
+
+          </form>
+        </div>
+      </div>
+
+      <div style="flex:1; min-width:320px;">
+        <div class="card">
+          <h3>Existing VTCs / VTNs</h3>
+          <div id="vtc-list"></div>
+        </div>
+        <div class="card">
+          <h3>Next Steps</h3>
+          <ul style="margin-left: 1.2rem; color: var(--color-text-muted); font-size:0.9rem;">
+            <li><a href="vtc-invite-join.html">Invite others to join</a></li>
+            <li><a href="vtc-manage.html">Manage membership &amp; governance</a></li>
+            <li>Issue credentials (VMC/VEC/VRC) (coming soon)</li>
+            <li>Check the authorization fast path (coming soon)</li>
+            <li>Group under a VTN (coming soon)</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">P2P Trust Stack — utility-server UI</div>
+  </footer>
+
+  <script>
+    let currentStep = 1;
+    let currentIdentityUuid = null;
+
+    function showStep(n) {
+      for (let i = 1; i <= 3; i++) {
+        const el = document.getElementById('step-' + i);
+        if (el) el.style.display = (i === n) ? 'block' : 'none';
+      }
+      currentStep = n;
+      if (n === 3) loadAdminChecklist();
+    }
+
+    function nextStep(n) {
+      if (currentStep === 2) {
+        const name = document.getElementById('vtc-name').value.trim();
+        if (!name) { showError('Please enter a community name.'); return; }
+      }
+      showStep(n);
+    }
+
+    function prevStep(n) { showStep(n); }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    function showError(message) {
+      const el = document.getElementById('error');
+      el.style.display = 'block';
+      el.textContent = message;
+    }
+
+    async function loadAdminChecklist() {
+      const el = document.getElementById('admin-checklist');
+      const hint = document.getElementById('admin-hint');
+      const btn = document.getElementById('create-btn');
+      const kind = document.getElementById('vtc-kind').value;
+      const minCount = kind === 'vtc' ? 2 : 1;
+      document.getElementById('admin-min-count').textContent = minCount;
+
+      // Show loading state, disable create until checklist loads
+      el.innerHTML = '<p class="text-muted">Loading eligible VTAs\u2026</p>';
+      if (btn) btn.disabled = true;
+
+      try {
+        // Get current session to find the creator's UUID
+        const statusRes = await fetch('/auth/status');
+        const status = await statusRes.json();
+        currentIdentityUuid = status.identityUuid || null;
+
+        if (!status.authenticated || !status.identityUuid) {
+          el.innerHTML = '<p class="text-muted" style="color:#f87171;">' +
+            'You must <a href="/ui/login.html">log in</a> first to create a VTC.</p>';
+          return;
+        }
+
+        // Load VRC-filtered candidate list including the creator
+        const res = await fetch('/vtcs/admin-candidates?creatorUuid=' + encodeURIComponent(currentIdentityUuid));
+        if (!res.ok) {
+          el.innerHTML = '<p class="text-muted" style="color:#f87171;">Server error: ' + res.status + '</p>';
+          return;
+        }
+        const candidates = await res.json();
+
+        if (!candidates || candidates.length === 0) {
+          el.innerHTML = '<p class="text-muted">No identities available.</p>';
+          if (hint) hint.style.display = 'none';
+          return;
+        }
+
+        // First entry is always the creator (isCreator: true), pre-checked.
+        // Remaining entries are VRC-connected co-admin candidates.
+        var creator = candidates[0];
+        var coAdmins = candidates.slice(1);
+
+        var html = '<label class="checkbox-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;">' +
+          '<input type="checkbox" value="' + creator.uuid + '" checked>' +
+          '<strong>' + escapeHtml(creator.name || '(you)') + '</strong> ' +
+          '<span style="font-size:0.8em;color:#fbbf24;">(you — founding admin)</span>' +
+          '</label>';
+
+        if (coAdmins.length > 0) {
+          html += '<div style="border-top:1px solid #334155;margin:6px 0;padding-top:4px;font-size:0.8em;color:#64748b;">VRC-connected co-admins:</div>';
+          html += coAdmins.map(function(c) {
+            return '<label class="checkbox-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;">' +
+              '<input type="checkbox" value="' + c.uuid + '">' +
+              escapeHtml(c.name || '(unnamed)') +
+              ' — DID ' + escapeHtml((c.did || '').slice(0, 12)) + '…' +
+              '</label>';
+          }).join('');
+        } else {
+          html += '<p style="font-size:0.8em;color:#fbbf24;margin:6px 0;">' +
+            '⚠️ No VRC-connected co-admins found. VTCs require at least 2 founding admins with mutual VRCs. ' +
+            'Establish a VRC with another VTA via the Relationships page before creating this community.</p>';
+        }
+
+        el.innerHTML = html;
+        if (hint) hint.style.display = 'block';
+      } catch (err) {
+        el.innerHTML = '<p class="text-muted" style="color:#f87171;">Failed to load VTAs: ' + escapeHtml(err.message) + '</p>';
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    function syncThresholdToAdminCount() {
+      // Threshold is independent of the admin checklist.
+      // VTCs enforce min=2, VTNs min=1. No max — user can set any value;
+      // the VTC becomes active only when enough admins have joined.
+      var t = document.getElementById('vtc-threshold');
+      var k = document.getElementById('vtc-kind').value;
+      t.min = (k === 'vtc') ? 2 : 1;
+    }
+
+    async function loadVtcList() {
+      var el = document.getElementById('vtc-list');
+      try {
+        var r = await fetch('/vtcs');
+        if (!r.ok) throw new Error('GET /vtcs failed: ' + r.status);
+        var vtcs = await r.json();
+
+        if (vtcs.length === 0) {
+          el.innerHTML = '<p class="text-muted">None yet.</p>';
+          return;
+        }
+
+        el.innerHTML = vtcs.map(function(v) {
+          var id = v.identity;
+          var gov = v.governance;
+          var isVtn = id.role === 'vtn';
+          return '<div class="entity-row">' +
+            '<span class="persona-avatar" style="background:#334155;">' + (isVtn ? 'VN' : 'VC') + '</span>' +
+            '<div>' +
+            '<div class="name">' + escapeHtml(id.name || '(unnamed)') + ' <span class="badge">' + id.role.toUpperCase() + '</span></div>' +
+            '<div class="meta">' + v.activeMemberCount + ' member(s)' +
+            (gov ? ' M=' + gov.adminThresholdM + '/' + gov.adminThresholdN + ' admins' : '') + '</div>' +
+            '</div><span class="spacer"></span></div>';
+        }).join('');
+      } catch (err) {
+        el.innerHTML = '<p class="text-muted">Failed: ' + escapeHtml(err.message) + '</p>';
+      }
+    }
+
+    function submitForm() {
+      var errEl = document.getElementById('error');
+      errEl.style.display = 'none';
+
+      var name = document.getElementById('vtc-name').value.trim();
+      var kind = document.getElementById('vtc-kind').value;
+      var ids = Array.from(document.querySelectorAll('#admin-checklist input:checked'))
+        .map(function(cb) { return cb.value; });
+      var threshold = parseInt(document.getElementById('vtc-threshold').value, 10) || 2;
+
+      if (!name) { showError('Community name is required.'); return; }
+      if (ids.length === 0) { showError('Select at least one founding admin.'); return; }
+      if (kind === 'vtc' && ids.length < 2) {
+        showError('VTCs require at least 2 founding admins with mutual VRCs. Create a VRC with another VTA first.');
+        return;
+      }
+
+      var btn = document.getElementById('create-btn');
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
+
+      fetch('/vtcs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, kind: kind, adminUuids: ids, threshold: threshold, creatorUuid: currentIdentityUuid }),
+      })
+        .then(async function(res) {
+          var body = await res.json();
+          if (!res.ok) throw new Error((body && body.error && body.error.message) || 'POST /vtcs failed: ' + res.status);
+          document.getElementById('vtc-name').value = '';
+          document.getElementById('vtc-kind').value = 'vtc';
+          showStep(1);
+          loadVtcList();
+        })
+        .catch(function(err) { showError(err.message); })
+        .finally(function() {
+          btn.disabled = false;
+          btn.textContent = 'Create Community \u2192';
+        });
+    }
+
+    document.getElementById('vtc-kind').addEventListener('change', function() {
+      var kind = this.value;
+      document.getElementById('kind-hint').textContent = kind === 'vtn'
+        ? 'A VTN is an umbrella network that groups multiple VTCs under shared governance.'
+        : 'A VTC governs a specific trust domain &mdash; membership, relationships, endorsements, etc.';
+      var mc = kind === 'vtc' ? 2 : 1;
+      document.getElementById('admin-min-count').textContent = mc;
+      document.getElementById('vtc-threshold').min = mc;
+      document.getElementById('vtc-threshold').value = mc;
+    });
+
+    loadVtcList();
+    showStep(1);
+
+    // Redirect to login if not authenticated
+    fetch('/auth/status')
+      .then(function(r) { return r.json(); })
+      .then(function(s) { if (!s.authenticated) location.href = 'login.html'; })
+      .catch(function() {});
+  </script>
+
+
+</body>
+
+</html>

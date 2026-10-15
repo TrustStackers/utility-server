@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Namespace Management — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>🌐 Namespace Management</h1>
+      <p>View the configured namespace, its namespace VTN, and the community structure it serves.
+        The utility server is the authority for one namespace (e.g., <code>p2pts.mainnet</code>)
+        backed by YugabyteDB for serializable transaction isolation.</p>
+    </div>
+  </div>
+
+  <div class="container section">
+    <p><a href="index.html">&larr; Back to dashboard</a></p>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div class="card">
+      <h3>Namespace Overview</h3>
+      <div id="namespace-stats"><p class="text-muted">Loading…</p></div>
+    </div>
+
+    <div class="card">
+      <h3>Server Identity</h3>
+      <p class="text-muted mb-md">This utility server's own VTA identity — a first-class did:scid:vh
+        identity used for signing TSP protocol messages.</p>
+      <div id="server-identity"><p class="text-muted">Loading…</p></div>
+    </div>
+
+    <div class="card">
+      <h3>Database Status</h3>
+      <p class="text-muted mb-md">YugabyteDB connection and table statistics.</p>
+      <div id="db-status"><p class="text-muted">Loading…</p></div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">P2P Trust Stack — utility-server UI &middot; Backed by YugabyteDB</div>
+  </footer>
+
+  <script>
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    async function loadNamespaceData() {
+      const statsEl = document.getElementById('namespace-stats');
+      const serverEl = document.getElementById('server-identity');
+      const dbEl = document.getElementById('db-status');
+      const errorEl = document.getElementById('error');
+
+      try {
+        // Configured namespace (the value previously missing from the UI).
+        const nsRes = await fetch('/namespace/status');
+        const ns = nsRes.ok ? await nsRes.json() : null;
+
+        // Resolve the namespace VTN's name + DID.
+        let vtnName = null, vtnDid = null;
+        if (ns && ns.vtnUuid) {
+          try {
+            const vtnRes = await fetch('/identities/' + encodeURIComponent(ns.vtnUuid));
+            const vtn = vtnRes.ok ? await vtnRes.json() : null;
+            if (vtn) { vtnName = vtn.name; vtnDid = vtn.did; }
+          } catch { /* ignore */ }
+        }
+
+        // Load summary for counts
+        const summaryRes = await fetch('/dashboard/summary');
+        const summary = summaryRes.ok ? await summaryRes.json() : null;
+
+        // Load identities for breakdown + server identity
+        const idRes = await fetch('/identities');
+        const identities = idRes.ok ? await idRes.json() : [];
+
+        const vtas = identities.filter(i => i.role === 'vta');
+        const vtcs = identities.filter(i => i.role === 'vtc');
+        const vtns = identities.filter(i => i.role === 'vtn');
+        const localCustody = identities.filter(i => i.custody === 'local');
+        const remoteCustody = identities.filter(i => i.custody === 'remote');
+
+        const configured = !!(ns && ns.namespace);
+
+        statsEl.innerHTML = `
+          <div class="key-card" style="margin-bottom:1rem;">
+            <div class="key-label">Configured Namespace</div>
+            <div style="font-size:1.25rem;font-weight:700;color:#60a5fa;">
+              ${configured ? '<code>' + escapeHtml(ns.namespace) + '</code>' : '<span style="color:#fbbf24;">Not configured</span>'}
+            </div>
+            <div class="text-muted" style="margin-top:.25rem;font-size:.85rem;">
+              ${configured ? 'This server is the authority for names <code>vta:' + escapeHtml(ns.namespace) + ':&lt;name&gt;</code>.' : 'Run the setup wizard to configure a namespace.'}
+            </div>
+          </div>
+          <div class="key-card" style="margin-bottom:1rem;">
+            <div class="key-label">Namespace VTN</div>
+            ${ns && ns.vtnUuid
+              ? (vtnName ? escapeHtml(vtnName) : '<span class="text-muted">(unnamed)</span>') + (vtnDid ? '<br><code style="font-size:.75rem;word-break:break-all;">' + escapeHtml(vtnDid) + '</code>' : '')
+              : '<span class="text-muted">None</span>'}
+          </div>
+          <div style="margin-bottom:1rem;">
+            <a class="btn btn-primary" href="config.html">⚙️ Manage Namespace &amp; Server Configuration</a>
+          </div>
+          <div class="summary-grid" style="margin-bottom:1rem;">
+            <div class="summary-card"><div class="num">${vtas.length}</div><div class="label">VTAs</div></div>
+            <div class="summary-card"><div class="num">${vtcs.length}</div><div class="label">VTCs</div></div>
+            <div class="summary-card"><div class="num">${vtns.length}</div><div class="label">VTNs</div></div>
+            <div class="summary-card"><div class="num">${summary ? summary.vrcs + summary.otherCredentials : '—'}</div><div class="label">Credentials</div></div>
+          </div>
+          <div class="key-card">
+            <div class="key-label">Custody Distribution</div>
+            Local: ${localCustody.length} · Remote: ${remoteCustody.length}
+          </div>
+        `;
+
+        // Server's own identity (local custody, organization subject kind).
+        const serverVta = vtas.find(i => i.custody === 'local' && i.subjectKind === 'organization');
+        if (serverVta) {
+          serverEl.innerHTML = `
+            <div class="key-card"><div class="key-label">Server Name</div>${escapeHtml(serverVta.name || '(unnamed)')}</div>
+            <div class="key-card"><div class="key-label">DID</div><code style="font-size:.75rem;word-break:break-all;">${escapeHtml(serverVta.did || 'unknown')}</code></div>
+            <div class="key-card"><div class="key-label">Identity UUID</div><code style="font-size:.75rem;word-break:break-all;">${escapeHtml(serverVta.uuid || 'unknown')}</code></div>
+          `;
+        } else {
+          serverEl.innerHTML = '<p class="text-muted">No server VTA identity found. It is created on first boot.</p>';
+        }
+
+        // Database status
+        dbEl.innerHTML = `
+          <div class="key-card"><div class="key-label">Backend</div>YugabyteDB (distributed SQL)</div>
+          <div class="key-card"><div class="key-label">Isolation Level</div>Serializable</div>
+          <div class="key-card"><div class="key-label">Total Identities</div>${identities.length}</div>
+          <div class="key-card"><div class="key-label">Connection</div><span style="color:var(--success);">● Connected</span></div>
+        `;
+      } catch (err) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = `Failed to load namespace data: ${err.message}`;
+      }
+    }
+
+    loadNamespaceData();
+  </script>
+</body>
+</html>

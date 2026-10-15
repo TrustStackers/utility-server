@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Issue & Verify Credentials — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .sig-pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin: 2px 4px 2px 0;
+    }
+    .sig-pill.valid {
+      background: #dcfce7;
+      color: #15803d;
+    }
+    .sig-pill.invalid {
+      background: #fee2e2;
+      color: #991b1b;
+    }
+    .sig-pill.unverifiable {
+      background: #f1f5f9;
+      color: #475569;
+    }
+    .stat-row {
+      display: flex;
+      gap: var(--space-md);
+      flex-wrap: wrap;
+      margin-bottom: var(--space-lg);
+    }
+    .stat {
+      flex: 1;
+      min-width: 120px;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: var(--space-md);
+      text-align: center;
+    }
+    .stat .num {
+      font-size: 1.6rem;
+      font-weight: 800;
+      color: var(--color-accent);
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+    .stat .label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--color-text-muted);
+    }
+    .detail-section {
+      margin-top: var(--space-md);
+      padding: var(--space-md);
+      background: var(--color-surface-alt);
+      border-radius: var(--radius);
+    }
+    .detail-section pre {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 0;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>&#x1F4DC; Issue & Verify Credentials</h1>
+      <p>Credentials observed by this utility server — including VMCs auto-issued on membership approval and VRCs
+        notified by agent nodes over TSP. Verification runs against locally-known DIDs and keys.</p>
+    </div>
+  </div>
+
+  <div class="container section">
+
+    <p><a href="index.html">&larr; Back to dashboard</a></p>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <!-- Summary stats -->
+    <div class="stat-row" id="stats-row">
+      <div class="stat"><div class="num" id="stat-vmc">—</div><div class="label">VMCs</div></div>
+      <div class="stat"><div class="num" id="stat-vrc">—</div><div class="label">VRCs</div></div>
+      <div class="stat"><div class="num" id="stat-vec">—</div><div class="label">VECs</div></div>
+      <div class="stat"><div class="num" id="stat-custom">—</div><div class="label">Custom</div></div>
+      <div class="stat"><div class="num" id="stat-revoked">—</div><div class="label">Revoked</div></div>
+    </div>
+
+    <!-- Verify section -->
+    <div class="card">
+      <h3>Verify a Credential</h3>
+      <div class="field">
+        <label for="verify-select">Choose a credential to verify</label>
+        <select id="verify-select"></select>
+      </div>
+      <button class="btn btn-primary" id="verify-btn">Run Verification</button>
+      <div id="verify-result" class="mt-md"></div>
+    </div>
+
+    <!-- All Credentials list -->
+    <div class="card">
+      <h3>All Credentials</h3>
+      <div class="field" style="display:flex;gap:var(--space-sm);flex-wrap:wrap;">
+        <select id="filter-type" style="flex:1;min-width:140px;">
+          <option value="">All Types</option>
+          <option value="vmc">VMC</option>
+          <option value="vrc">VRC</option>
+          <option value="vec">VEC</option>
+          <option value="custom_endorsement">Custom Endorsement</option>
+          <option value="delegation">Delegation</option>
+        </select>
+        <select id="filter-status" style="flex:1;min-width:140px;">
+          <option value="">All Statuses</option>
+          <option value="issued">Issued</option>
+          <option value="pending_signatures">Pending Signatures</option>
+          <option value="revoked">Revoked</option>
+          <option value="expired">Expired</option>
+        </select>
+      </div>
+      <div id="cred-list" class="mt-md"></div>
+    </div>
+
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">P2P Trust Stack — utility-server UI</div>
+  </footer>
+
+  <script>
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+    function short(str, len = 20) {
+      if (!str) return '';
+      return str.length > len ? str.slice(0, len) + '\u2026' : str;
+    }
+    function initials(name) {
+      return (name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+    }
+    function fmtTime(unix) {
+      if (!unix) return '—';
+      return new Date(unix * 1000).toLocaleString();
+    }
+    function vcTypeLabel(t) {
+      const map = { vmc: 'VMC', vrc: 'VRC', vec: 'VEC', custom_endorsement: 'Custom', delegation: 'Delegation' };
+      return map[t] || t;
+    }
+    function statusBadgeClass(s) {
+      const map = { issued: 'badge-success', pending_signatures: 'badge-warning', revoked: 'badge-danger', expired: 'badge-danger' };
+      return map[s] || '';
+    }
+
+    const KIND_ICON = { human: '\u{1F464}', organization: '\u{1F3E2}', ai_agent: '\u{1F916}', object: '\u{1F4E6}' };
+
+    // Cache for identity lookups
+    let identityCache = {};
+
+    // -----------------------------------------------------------------------
+    // API helpers
+    // -----------------------------------------------------------------------
+    async function apiGet(path) {
+      const res = await fetch(path);
+      if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
+      return res.json();
+    }
+    async function apiPost(path, body) {
+      const res = await fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message || `POST ${path} failed: ${res.status}`);
+      return data;
+    }
+
+    async function loadIdentities(ids) {
+      const missing = ids.filter(id => !identityCache[id]);
+      if (missing.length === 0) return;
+      for (const id of missing) {
+        try {
+          identityCache[id] = await apiGet(`/identities/${id}`);
+        } catch { identityCache[id] = { id, name: `#${id}`, subjectKind: null, role: 'vta' }; }
+      }
+    }
+    function identityName(id) {
+      return identityCache[id]?.name || `#${id}`;
+    }
+    function identityKindIcon(id) {
+      const k = identityCache[id]?.subjectKind;
+      return KIND_ICON[k] || '';
+    }
+
+    // -----------------------------------------------------------------------
+    // Render
+    // -----------------------------------------------------------------------
+    async function render() {
+      const errorEl = document.getElementById('error');
+      errorEl.style.display = 'none';
+      try {
+        const credentials = await apiGet('/credentials');
+        const ids = new Set();
+        for (const c of credentials) { ids.add(c.issuerIdentityId); ids.add(c.subjectIdentityId); }
+        await loadIdentities([...ids]);
+
+        const filterType = document.getElementById('filter-type').value;
+        const filterStatus = document.getElementById('filter-status').value;
+        const filtered = credentials.filter(c =>
+          (!filterType || c.vcType === filterType) &&
+          (!filterStatus || c.status === filterStatus)
+        );
+
+        renderStats(credentials);
+        renderVerifySelect(filtered);
+        renderCredList(filtered);
+      } catch (err) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = `Failed to load credentials: ${err.message}`;
+      }
+    }
+
+    function renderStats(creds) {
+      document.getElementById('stat-vmc').textContent = creds.filter(c => c.vcType === 'vmc').length;
+      document.getElementById('stat-vrc').textContent = creds.filter(c => c.vcType === 'vrc').length;
+      document.getElementById('stat-vec').textContent = creds.filter(c => c.vcType === 'vec').length;
+      document.getElementById('stat-custom').textContent = creds.filter(c => c.vcType === 'custom_endorsement' || c.vcType === 'delegation').length;
+      document.getElementById('stat-revoked').textContent = creds.filter(c => c.status === 'revoked').length;
+    }
+
+    function renderVerifySelect(creds) {
+      const sel = document.getElementById('verify-select');
+      if (creds.length === 0) {
+        sel.innerHTML = '<option value="">No credentials yet</option>';
+        return;
+      }
+      sel.innerHTML = creds.map(c => {
+        const subjName = identityName(c.subjectIdentityId);
+        const issName = identityName(c.issuerIdentityId);
+        return `<option value="${c.id}">${vcTypeLabel(c.vcType)} — ${escapeHtml(subjName)} (by ${escapeHtml(issName)}) [${c.status}]</option>`;
+      }).join('');
+    }
+
+    function renderCredList(creds) {
+      const el = document.getElementById('cred-list');
+      if (creds.length === 0) {
+        el.innerHTML = '<p class="text-muted">No credentials match the current filter.</p>';
+        return;
+      }
+      el.innerHTML = creds.slice().reverse().map(c => {
+        const subjName = identityName(c.subjectIdentityId);
+        const issName = identityName(c.issuerIdentityId);
+        const issIcon = c.vcType === 'vmc' ? '\u{1F3DB}' : identityKindIcon(c.issuerIdentityId);
+        return `<div class="entity-row">
+          <span class="persona-avatar">${initials(subjName)}</span>
+          <div>
+            <div class="name">${vcTypeLabel(c.vcType)} — ${escapeHtml(subjName)} ${identityKindIcon(c.subjectIdentityId)}</div>
+            <div class="meta">issued by ${issIcon} ${escapeHtml(issName)} · ${c.thresholdRequired ? 'up to ' + c.thresholdRequired + ' sig(s)' : 'single-signer'} · ${fmtTime(c.createdAt)}${c.validUntil ? ' · expires ' + fmtTime(c.validUntil) : ''}</div>
+          </div>
+          <span class="spacer"></span>
+          <span class="badge ${statusBadgeClass(c.status)}">${c.status}</span>
+          ${c.status === 'issued' ? `<button class="btn btn-sm btn-danger" data-revoke="${c.id}">Revoke</button>` : ''}
+          <button class="btn btn-sm btn-outline" data-detail="${c.id}">Details</button>
+        </div>`;
+      }).join('');
+
+      // Revoke handlers
+      el.querySelectorAll('[data-revoke]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = parseInt(btn.getAttribute('data-revoke'));
+          try {
+            await apiPost(`/credentials/${id}/revoke`, { reason: 'manual revocation via UI' });
+            render();
+          } catch (err) {
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error').textContent = `Revoke failed: ${err.message}`;
+          }
+        });
+      });
+
+      // Detail handlers
+      el.querySelectorAll('[data-detail]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const id = parseInt(btn.getAttribute('data-detail'));
+          try {
+            const [cred, sigs] = await Promise.all([
+              apiGet(`/credentials/${id}`),
+              apiGet(`/credentials/${id}/signatures`)
+            ]);
+            const sigIds = new Set();
+            for (const s of sigs) sigIds.add(s.signerIdentityId);
+            await loadIdentities([...sigIds]);
+
+            let sigsHtml = '<p class="text-muted">No signatures recorded.</p>';
+            if (sigs.length > 0) {
+              sigsHtml = sigs.map(s => {
+                const name = identityName(s.signerIdentityId);
+                return `<span class="sig-pill valid">\u2713 ${escapeHtml(name)}</span>`;
+              }).join('');
+            }
+
+            let claimHtml = '<p class="text-muted">(none)</p>';
+            if (cred.claim) {
+              try {
+                const parsed = JSON.parse(cred.claim);
+                claimHtml = `<pre>${escapeHtml(JSON.stringify(parsed, null, 2))}</pre>`;
+              } catch {
+                claimHtml = `<pre>${escapeHtml(cred.claim)}</pre>`;
+              }
+            }
+
+            const detailDiv = document.createElement('div');
+            detailDiv.className = 'detail-section';
+            detailDiv.innerHTML = `
+              <h4>Credential #${cred.id}</h4>
+              <div class="entity-row"><strong>Type:</strong> <span class="spacer"></span> ${vcTypeLabel(cred.vcType)}</div>
+              <div class="entity-row"><strong>Issuer:</strong> <span class="spacer"></span> ${escapeHtml(identityName(cred.issuerIdentityId))}</div>
+              <div class="entity-row"><strong>Subject:</strong> <span class="spacer"></span> ${escapeHtml(identityName(cred.subjectIdentityId))}</div>
+              <div class="entity-row"><strong>Status:</strong> <span class="spacer"></span> <span class="badge ${statusBadgeClass(cred.status)}">${cred.status}</span></div>
+              <div class="entity-row"><strong>Threshold:</strong> <span class="spacer"></span> ${cred.thresholdRequired ?? '1 (single-signer)'}</div>
+              <div class="entity-row"><strong>Valid from:</strong> <span class="spacer"></span> ${fmtTime(cred.validFrom)}</div>
+              <div class="entity-row"><strong>Valid until:</strong> <span class="spacer"></span> ${cred.validUntil ? fmtTime(cred.validUntil) : 'no expiry'}</div>
+              <div class="entity-row"><strong>Credential Digest:</strong> <span class="spacer"></span> <code>${cred.credentialDigest ? short(cred.credentialDigest, 32) : '—'}</code></div>
+              <div class="entity-row"><strong>Status List:</strong> <span class="spacer"></span> ${cred.statusListId ? `list #${cred.statusListId}, index ${cred.statusListIndex}` : 'not assigned'}</div>
+              <p style="margin-top:var(--space-md);"><strong>Signatures (${sigs.length}):</strong></p>
+              ${sigsHtml}
+              <p style="margin-top:var(--space-md);"><strong>Claim Payload:</strong></p>
+              ${claimHtml}
+              <button class="btn btn-sm btn-outline mt-md" onclick="this.parentElement.remove()">Close</button>
+            `;
+            btn.parentElement.after(detailDiv);
+          } catch (err) {
+            document.getElementById('error').style.display = 'block';
+            document.getElementById('error').textContent = `Failed to load details: ${err.message}`;
+          }
+        });
+      });
+    }
+
+    // -----------------------------------------------------------------------
+    // Verify
+    // -----------------------------------------------------------------------
+    document.getElementById('verify-btn').addEventListener('click', async () => {
+      const credId = document.getElementById('verify-select').value;
+      const el = document.getElementById('verify-result');
+      if (!credId) { el.innerHTML = '<p class="text-muted">Select a credential first.</p>'; return; }
+      try {
+        const result = await apiPost(`/credentials/${credId}/verify`, {});
+        if (result.valid) {
+          const sigDetails = (result.signatureResults || []).map(s => {
+            const cls = s.valid ? 'valid' : (s.valid === false ? 'invalid' : 'unverifiable');
+            const icon = s.valid ? '\u2713' : '\u2717';
+            return `<span class="sig-pill ${cls}">${icon} ${escapeHtml(s.signerName || s.signerIdentityId)}</span>`;
+          }).join('');
+          el.innerHTML = `
+            <div class="explainer" style="border-color: var(--color-success); background: rgba(22,163,74,0.08);">
+              \u2705 <strong>Credential is valid.</strong> ${escapeHtml(result.reason)}
+            </div>
+            ${sigDetails || '<p class="text-muted">No signature details available.</p>'}
+          `;
+        } else {
+          el.innerHTML = `
+            <div class="explainer warning">
+              \u274C <strong>Credential is NOT valid.</strong> ${escapeHtml(result.reason)}
+            </div>
+          `;
+        }
+      } catch (err) {
+        el.innerHTML = `<div class="explainer warning">\u26A0 Verification failed: ${escapeHtml(err.message)}</div>`;
+      }
+    });
+
+    // -----------------------------------------------------------------------
+    // Filters
+    // -----------------------------------------------------------------------
+    document.getElementById('filter-type').addEventListener('change', render);
+    document.getElementById('filter-status').addEventListener('change', render);
+
+    render();
+  </script>
+
+</body>
+
+</html>

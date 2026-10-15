@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Server Configuration — P2PTS Utility Server</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#0b0f17; color:#e2e8f0; margin:0; padding:2rem; }
+  .wrap { max-width:680px; margin:0 auto; }
+  .card { background:#121826; border:1px solid #1e2535; border-radius:10px; padding:1.5rem; margin-bottom:1rem; }
+  h1, h2 { color:#60a5fa; }
+  label { display:block; margin:0.75rem 0 0.25rem; font-size:0.85rem; color:#94a3b8; }
+  input { width:100%; padding:0.5rem; background:#0a0e17; border:1px solid #1e2535; border-radius:6px; color:#e2e8f0; box-sizing:border-box; }
+  button { margin-top:1rem; padding:0.6rem 1rem; background:#2563eb; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+  .row { display:flex; justify-content:space-between; padding:0.4rem 0; border-bottom:1px solid #1e2535; }
+  .row .k { color:#94a3b8; }
+  .row .v { font-family:monospace; word-break:break-all; text-align:right; margin-left:1rem; }
+  .error { color:#f87171; background:#7f1d1d; padding:0.5rem 0.75rem; border-radius:6px; display:none; margin-bottom:1rem; }
+  .ok { color:#6ee7b7; }
+  .note { color:#64748b; font-size:0.85rem; }
+  .mono { font-family:monospace; }
+  a { color:#93c5fd; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Server Configuration</h1>
+  <div id="error" class="error"></div>
+
+  <div id="auth-wall" class="card" style="display:none;">
+    <h2>Sign in required</h2>
+    <p class="note">You must be the founding admin of this server's namespace VTN to view or edit configuration.</p>
+    <a href="/ui/login.html">Sign in with your VTA</a>
+  </div>
+
+  <div id="config-view">
+    <div class="card">
+      <h2>Current configuration</h2>
+      <div class="row"><span class="k">Namespace</span><span class="v mono" id="c-namespace">—</span></div>
+      <div class="row"><span class="k">VTN</span><span class="v mono" id="c-vtn">—</span></div>
+      <div class="row"><span class="k">Founder admin</span><span class="v mono" id="c-admin">—</span></div>
+      <div class="row"><span class="k">Advertised IP / host</span><span class="v mono" id="c-host">—</span></div>
+      <div class="row"><span class="k">HTTP API port</span><span class="v mono" id="c-http">—</span></div>
+      <div class="row"><span class="k">libp2p / TSP port</span><span class="v mono" id="c-libp2p">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Edit configuration</h2>
+      <label>Advertised IP / hostname</label>
+      <input id="advertisedHost" placeholder="e.g. 203.0.113.5">
+      <label>HTTP API port</label>
+      <input id="httpPort" type="number">
+      <label>libp2p / TSP port</label>
+      <input id="libp2pPort" type="number">
+      <label>Namespace (agent names use <span class="mono">vta:&lt;namespace&gt;:&lt;name&gt;</span>)</label>
+      <input id="namespace" placeholder="e.g. p2pts.mainnet">
+      <button onclick="saveConfig()">Save</button>
+      <p id="save-msg" class="note ok"></p>
+    </div>
+  </div>
+</div>
+<script>
+async function err(msg) { const e = document.getElementById('error'); e.textContent = msg || ''; e.style.display = msg ? 'block' : 'none'; }
+
+function render(cfg) {
+  const host = (cfg.network && cfg.network.advertisedHost) || '';
+  const http = (cfg.network && cfg.network.httpPort) || '';
+  const libp2p = (cfg.network && cfg.network.libp2pPort) || '';
+  document.getElementById('c-namespace').textContent = cfg.namespace || '—';
+  document.getElementById('c-vtn').textContent = cfg.vtnUuid || cfg.vtnDid || '—';
+  document.getElementById('c-admin').textContent = cfg.adminVtaUuid || '—';
+  document.getElementById('c-host').textContent = host || '—';
+  document.getElementById('c-http').textContent = http || '—';
+  document.getElementById('c-libp2p').textContent = libp2p || '—';
+  document.getElementById('advertisedHost').value = host;
+  document.getElementById('httpPort').value = http;
+  document.getElementById('libp2pPort').value = libp2p;
+  document.getElementById('namespace').value = cfg.namespace || '';
+}
+
+async function loadConfig() {
+  try {
+    const r = await fetch('/config');
+    if (r.status === 401 || r.status === 403) {
+      document.getElementById('auth-wall').style.display = 'block';
+      document.getElementById('config-view').style.display = 'none';
+      return;
+    }
+    const d = await r.json();
+    if (!r.ok) { err(d && d.error ? d.error.message : 'Failed to load config'); return; }
+    render(d);
+  } catch (e) { err(e.message); }
+}
+
+async function saveConfig() {
+  const body = {
+    advertisedHost: document.getElementById('advertisedHost').value.trim(),
+    httpPort: parseInt(document.getElementById('httpPort').value, 10),
+    libp2pPort: parseInt(document.getElementById('libp2pPort').value, 10),
+    namespace: document.getElementById('namespace').value.trim(),
+  };
+  try {
+    const r = await fetch('/config', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) { err(d && d.error ? d.error.message : 'Save failed'); return; }
+    err('');
+    document.getElementById('save-msg').textContent = d.note || 'Saved.';
+    render(d.config);
+  } catch (e) { err(e.message); }
+}
+
+loadConfig();
+</script>
+</body>
+</html>

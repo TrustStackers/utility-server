@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Manage a VTC — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>🛠️ Manage a VTC</h1>
+      <p>Scenario 6. Roster, governance parameters, and personhood ceremony log for a single Verified
+        Trust Community — the admin-facing counterpart to <a href="vtc-invite-join.html">Invite &amp;
+          Join</a>. Talks to the real <code>/communities/:id/dashboard</code>,
+        <code>/communities/:id/governance</code>, <code>/memberships/:id/*</code>, and
+        <code>/memberships/:id/personhood-events</code> endpoints.</p>
+    </div>
+  </div>
+
+  <div class="container section">
+    <p><a href="index.html">&larr; Back to dashboard</a> · <a href="vtc-invite-join.html">Invite &amp; Join a VTC &rarr;</a></p>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div class="card">
+      <h3>Select a Community</h3>
+      <div class="field">
+        <label for="vtc-select">VTC / VTN</label>
+        <select id="vtc-select"></select>
+      </div>
+    </div>
+
+    <div id="community-panel" style="display:none;">
+      <div class="summary-grid">
+        <div class="summary-card">
+          <div class="num" id="summary-active">0</div>
+          <div class="label">Active Members</div>
+        </div>
+        <div class="summary-card">
+          <div class="num" id="summary-pending">0</div>
+          <div class="label">Pending Requests</div>
+        </div>
+        <div class="summary-card">
+          <div class="num" id="summary-threshold">—</div>
+          <div class="label">Admin M-of-N</div>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div>
+          <div class="card">
+            <h3>Governance</h3>
+            <form id="governance-form">
+              <div class="field">
+                <label for="gov-m">Threshold M</label>
+                <input type="text" id="gov-m" placeholder="e.g. 2">
+              </div>
+              <div class="field">
+                <label for="gov-n">Threshold N</label>
+                <input type="text" id="gov-n" placeholder="e.g. 3">
+              </div>
+              <div class="field">
+                <label for="gov-policy">Policy Rules Notes</label>
+                <input type="text" id="gov-policy" placeholder="Free-text policy notes">
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm">Update Governance</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <h3>Pending Requests</h3>
+            <div id="pending-list"></div>
+          </div>
+
+          <div class="card" style="border-color:#dc2626;">
+            <h3 style="color:#dc2626;">Danger Zone</h3>
+            <p class="text-muted" style="font-size:0.82rem;">
+              Permanently deletes this community and all its governance,
+              memberships, credentials, and status lists. This cannot be undone.
+            </p>
+            <button id="delete-btn" class="btn btn-danger" style="width:100%;">
+              Delete This Community
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <h3>Active Roster</h3>
+            <div id="roster-list"></div>
+          </div>
+
+          <div class="card">
+            <h3>Personhood Ceremony Log</h3>
+            <p class="text-muted" style="font-size:0.82rem;">Select a roster member above to view/record
+              challenge &middot; assert &middot; revoke events for their membership.</p>
+            <div id="personhood-panel" style="display:none;">
+              <h4 id="personhood-member-label" class="mb-md"></h4>
+              <div id="personhood-log"></div>
+              <form id="personhood-form" class="mt-md">
+                <div class="field">
+                  <label for="personhood-event">Event</label>
+                  <select id="personhood-event">
+                    <option value="challenged">Challenged</option>
+                    <option value="asserted">Asserted</option>
+                    <option value="revoked">Revoked</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="personhood-reason">Reason (optional)</label>
+                  <input type="text" id="personhood-reason" placeholder="Context for this event">
+                </div>
+                <button type="submit" class="btn btn-outline btn-sm">Record Event</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">P2P Trust Stack — utility-server UI</div>
+  </footer>
+
+  <script>
+    let activeCommunityId = null;
+    let activeMembershipId = null;
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    function initials(name) {
+      if (!name) return '??';
+      return name.split(/\s+/).filter(Boolean).slice(0, 2).map(function(w) { return w[0].toUpperCase(); }).join('');
+    }
+
+    function showError(message) {
+      const el = document.getElementById('error');
+      el.style.display = 'block';
+      el.textContent = message;
+    }
+
+    function clearError() {
+      document.getElementById('error').style.display = 'none';
+    }
+
+    async function loadCommunities() {
+      const select = document.getElementById('vtc-select');
+      try {
+        const res = await fetch('/vtcs');
+        if (!res.ok) throw new Error(`GET /vtcs failed: ${res.status}`);
+        const vtcs = await res.json();
+        if (vtcs.length === 0) {
+          select.innerHTML = '<option value="">No communities yet — create one first</option>';
+          document.getElementById('community-panel').style.display = 'none';
+          return;
+        }
+        select.innerHTML = vtcs.map((v) => `<option value="${v.identity.uuid}">${escapeHtml(v.identity.name || '(unnamed)')} (#${v.identity.uuid}, ${v.identity.role})</option>`).join('');
+        activeCommunityId = select.value;
+        document.getElementById('community-panel').style.display = 'block';
+        await loadDashboard();
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    document.getElementById('vtc-select').addEventListener('change', async function () {
+      activeCommunityId = this.value;
+      activeMembershipId = null;
+      document.getElementById('personhood-panel').style.display = 'none';
+      await loadDashboard();
+    });
+
+    async function loadDashboard() {
+      clearError();
+      if (!activeCommunityId) return;
+      try {
+        const res = await fetch(`/communities/${activeCommunityId}/dashboard`);
+        if (!res.ok) throw new Error(`GET /communities/:id/dashboard failed: ${res.status}`);
+        const dash = await res.json();
+        renderDashboard(dash);
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    function renderDashboard(dash) {
+      const active = dash.roster?.active || [];
+      const pending = dash.roster?.pending || [];
+
+      document.getElementById('summary-active').textContent = active.length;
+      document.getElementById('summary-pending').textContent = pending.length;
+
+
+      const gov = dash.governance;
+      document.getElementById('summary-threshold').textContent = gov && gov.adminThresholdM != null
+        ? `${gov.adminThresholdM} of ${gov.adminThresholdN}`
+        : '—';
+      document.getElementById('gov-m').value = gov?.adminThresholdM ?? '';
+      document.getElementById('gov-n').value = gov?.adminThresholdN ?? '';
+      let policyNotes = '';
+      if (gov?.policyRules) {
+        try {
+          const parsed = JSON.parse(gov.policyRules);
+          policyNotes = parsed.notes || '';
+        } catch { /* non-JSON policy_rules, leave blank */ }
+      }
+      document.getElementById('gov-policy').value = policyNotes;
+
+      renderRoster(active);
+      renderPending(pending);
+    }
+
+    function renderRoster(active) {
+      const el = document.getElementById('roster-list');
+      if (active.length === 0) {
+        el.innerHTML = '<p class="text-muted">No active members yet.</p>';
+        return;
+      }
+      el.innerHTML = active.map((m) => `
+        <div class="entity-row">
+          <span class="persona-avatar">${initials(m.memberName || 'Member #'+m.memberIdentityUuid)}</span>
+          <div>
+            <div class="name">${escapeHtml(m.memberName || 'Member #'+m.memberIdentityUuid)} ${m.personhoodAsserted ? '<span class="badge badge-success">Personhood</span>' : ''}</div>
+            <div class="meta">membership #${m.uuid} · role: ${escapeHtml(m.role || 'member')} · <span class="badge badge-success">active</span></div>
+          </div>
+          <span class="spacer"></span>
+          <button class="btn btn-sm btn-outline" data-view-personhood="${m.uuid}" data-member-name="${escapeHtml(m.memberName || '')}" data-member="${m.memberIdentityUuid}">Personhood Log</button>
+          <button class="btn btn-sm btn-danger" data-revoke="${m.uuid}">Revoke</button>
+        </div>
+      `).join('');
+
+      el.querySelectorAll('[data-view-personhood]').forEach((btn) => {
+        btn.addEventListener('click', function () {
+          activeMembershipId = this.getAttribute('data-view-personhood');
+          document.getElementById('personhood-member-label').textContent =
+            (this.getAttribute('data-member-name') || 'Member #'+this.getAttribute('data-member')) + ' — membership #' + activeMembershipId;
+          document.getElementById('personhood-panel').style.display = 'block';
+          loadPersonhoodLog();
+        });
+      });
+
+      el.querySelectorAll('[data-revoke]').forEach((btn) => {
+        btn.addEventListener('click', async function () {
+          const id = this.getAttribute('data-revoke');
+          if (!confirm('Revoke this membership? Its backing VMC (if any) will also be revoked.')) return;
+          try {
+            const res = await fetch(`/memberships/${id}/revoke`, { method: 'POST' });
+            const body = await res.json();
+            if (!res.ok) throw new Error(body?.error?.message || `revoke failed: ${res.status}`);
+            loadDashboard();
+          } catch (err) {
+            showError(err.message);
+          }
+        });
+      });
+    }
+
+    function renderPending(pending) {
+      const el = document.getElementById('pending-list');
+      if (pending.length === 0) {
+        el.innerHTML = '<p class="text-muted">No pending join requests.</p>';
+        return;
+      }
+      el.innerHTML = pending.map((m) => `
+        <div class="entity-row">
+          <div>
+            <div class="name">Member #${m.memberIdentityUuid}</div>
+            <div class="meta">membership #${m.uuid} · role: ${escapeHtml(m.role || 'member')} · <span class="badge badge-warning">pending</span></div>
+          </div>
+          <span class="spacer"></span>
+          <button class="btn btn-sm btn-primary" data-approve="${m.uuid}">Approve</button>
+          <button class="btn btn-sm btn-danger" data-reject="${m.uuid}">Reject</button>
+        </div>
+      `).join('');
+
+      el.querySelectorAll('[data-approve]').forEach((btn) => {
+        btn.addEventListener('click', async function () {
+          const id = this.getAttribute('data-approve');
+          try {
+            const res = await fetch(`/memberships/${id}/approve`, { method: 'POST' });
+            const body = await res.json();
+            if (!res.ok) throw new Error(body?.error?.message || `approve failed: ${res.status}`);
+            loadDashboard();
+          } catch (err) {
+            showError(err.message);
+          }
+        });
+      });
+
+      el.querySelectorAll('[data-reject]').forEach((btn) => {
+        btn.addEventListener('click', async function () {
+          const id = this.getAttribute('data-reject');
+          try {
+            const res = await fetch(`/memberships/${id}/reject`, { method: 'POST' });
+            const body = await res.json();
+            if (!res.ok) throw new Error(body?.error?.message || `reject failed: ${res.status}`);
+            loadDashboard();
+          } catch (err) {
+            showError(err.message);
+          }
+        });
+      });
+    }
+
+    async function loadPersonhoodLog() {
+      const el = document.getElementById('personhood-log');
+      if (!activeMembershipId) return;
+      try {
+        const res = await fetch(`/memberships/${activeMembershipId}/personhood-events`);
+        if (!res.ok) throw new Error(`GET personhood-events failed: ${res.status}`);
+        const events = await res.json();
+        if (events.length === 0) {
+          el.innerHTML = '<p class="text-muted">No personhood events recorded yet.</p>';
+          return;
+        }
+        el.innerHTML = events.map((ev) => `
+          <div class="entity-row">
+            <div>
+              <div class="name">${escapeHtml(ev.event)}</div>
+              <div class="meta">${escapeHtml(ev.reason || 'no reason given')}${ev.occurredAt ? ' · ' + new Date(ev.occurredAt * 1000).toLocaleString() : ''}</div>
+            </div>
+          </div>
+        `).join('');
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    document.getElementById('personhood-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      if (!activeMembershipId) return;
+      const event = document.getElementById('personhood-event').value;
+      const reason = document.getElementById('personhood-reason').value.trim();
+      try {
+        const res = await fetch(`/memberships/${activeMembershipId}/personhood-events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event, reason: reason || undefined }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error?.message || `personhood-events failed: ${res.status}`);
+        document.getElementById('personhood-reason').value = '';
+        loadPersonhoodLog();
+        loadDashboard();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    document.getElementById('governance-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      clearError();
+      if (!activeCommunityId) return;
+      const m = document.getElementById('gov-m').value.trim();
+      const n = document.getElementById('gov-n').value.trim();
+      const policy = document.getElementById('gov-policy').value.trim();
+
+      const payload = {};
+      if (m) payload.adminThresholdM = Number(m);
+      if (n) payload.adminThresholdN = Number(n);
+      if (policy) payload.policyRules = { notes: policy };
+
+      try {
+        const res = await fetch(`/communities/${activeCommunityId}/governance`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error?.message || `PATCH governance failed: ${res.status}`);
+        loadDashboard();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    // ── Delete community ──────────────────────────────────────────────────
+    document.getElementById('delete-btn').addEventListener('click', async function () {
+      if (!activeCommunityId) return;
+      const select = document.getElementById('vtc-select');
+      const communityName = select.options[select.selectedIndex]?.text ?? 'this community';
+      if (!confirm(`Delete "${communityName}"?\n\nThis will permanently delete this community and ALL related data (governance, memberships, credentials, status lists). This cannot be undone.`)) return;
+      try {
+        const res = await fetch(`/vtcs/${activeCommunityId}`, { method: 'DELETE' });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error?.message || `DELETE failed: ${res.status}`);
+        alert(`Community "${communityName}" deleted.`);
+        // Reset and reload
+        activeCommunityId = null;
+        activeMembershipId = null;
+        document.getElementById('community-panel').style.display = 'none';
+        document.getElementById('personhood-panel').style.display = 'none';
+        loadCommunities();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    loadCommunities();
+  </script>
+
+</body>
+
+</html>

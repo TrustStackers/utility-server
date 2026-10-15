@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Recovery & Backup — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>💾 Recovery & Backup</h1>
+      <p>Backed-up identity state: keys, DID documents, and relationships. Agents push their
+        identity state to the utility server via <code>POST /identities/remote</code> for recovery.
+        This page shows all remotely-custodied identities available for restoration.</p>
+    </div>
+  </div>
+
+  <div class="container section">
+    <p><a href="index.html">&larr; Back to dashboard</a></p>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div class="card">
+      <h3>Remote-Custody Identities (Recoverable)</h3>
+      <p class="text-muted mb-md">Identities with <code>custody='remote'</code> — pushed by agents for backup.
+        These identities have public key material stored but no secret keys (those remain on the agent's device).</p>
+      <div id="remote-list">
+        <p class="text-muted">Loading…</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Local-Custody Identities (Server-Owned)</h3>
+      <p class="text-muted mb-md">Identities with <code>custody='local'</code> — created and managed by this
+        utility server (including the server's own VTA identity).</p>
+      <div id="local-list">
+        <p class="text-muted">Loading…</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Recovery Instructions</h3>
+      <div class="key-card">
+        <div class="key-label">For Agent Users</div>
+        <p class="text-muted">To back up your VTA identity to this utility server, use the agent-app's
+          <code>publishToInfrastructure()</code> method or the <code>POST /identities/remote</code> endpoint
+          with your DID document and public keys. Your secret keys never leave your device.</p>
+      </div>
+      <div class="key-card">
+        <div class="key-label">For Restoration</div>
+        <p class="text-muted">To restore from backup, use the agent-app's <code>syncFromInfrastructure()</code>
+          method. This fetches your DID document, rotation log, and public key material from the utility server
+          and bootstrap infrastructure. You will still need your seed phrase or root keypair to sign.</p>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">P2P Trust Stack — utility-server UI</div>
+  </footer>
+
+  <script>
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    function timeAgo(ts) {
+      if (!ts) return 'unknown';
+      const d = new Date(ts * 1000);
+      return d.toISOString().replace('T', ' ').substring(0, 19);
+    }
+
+    async function loadRecoveryData() {
+      const remoteEl = document.getElementById('remote-list');
+      const localEl = document.getElementById('local-list');
+      const errorEl = document.getElementById('error');
+
+      try {
+        const res = await fetch('/identities');
+        if (!res.ok) throw new Error(`GET /identities failed: ${res.status}`);
+        const identities = await res.json();
+
+        const remote = identities.filter(i => i.custody === 'remote');
+        const local = identities.filter(i => i.custody === 'local');
+
+        if (remote.length === 0) {
+          remoteEl.innerHTML = '<p class="text-muted">No remote-custody identities. Agents push identities via POST /identities/remote for backup.</p>';
+        } else {
+          remoteEl.innerHTML = remote.map(i => `
+            <div class="entity-row">
+              <span>☁️</span>
+              <div>
+                <div class="name">${escapeHtml(i.name || '(unnamed)')}</div>
+                <div class="meta"><code>${escapeHtml((i.did || '').substring(0, 40))}…</code> · ${escapeHtml(i.role)} · ${escapeHtml(i.subjectKind || 'unknown')}</div>
+              </div>
+              <span class="spacer"></span>
+              <span class="badge">remote</span>
+              <span class="meta" style="margin-left:0.5rem;">${timeAgo(i.createdAt)}</span>
+            </div>
+          `).join('');
+        }
+
+        if (local.length === 0) {
+          localEl.innerHTML = '<p class="text-muted">No local-custody identities.</p>';
+        } else {
+          localEl.innerHTML = local.map(i => `
+            <div class="entity-row">
+              <span>🏠</span>
+              <div>
+                <div class="name">${escapeHtml(i.name || '(unnamed)')}</div>
+                <div class="meta"><code>${escapeHtml((i.did || '').substring(0, 40))}…</code> · ${escapeHtml(i.role)} · ${escapeHtml(i.subjectKind || 'unknown')}</div>
+              </div>
+              <span class="spacer"></span>
+              <span class="badge">local</span>
+              <span class="meta" style="margin-left:0.5rem;">${timeAgo(i.createdAt)}</span>
+            </div>
+          `).join('');
+        }
+      } catch (err) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = `Failed to load recovery data: ${err.message}`;
+      }
+    }
+
+    loadRecoveryData();
+  </script>
+
+</body>
+
+</html>

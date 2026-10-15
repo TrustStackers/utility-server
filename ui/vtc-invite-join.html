@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invite &amp; Join a VTC — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>🤝 Invite &amp; Join a VTC</h1>
+      <p>Scenario 5. Discovery is deliberately OOBI-only — no public directory, no DHT search.
+        An admin mints a shareable invitation string for their community; a prospective member decodes it
+        and submits a join request that lands as a <code>pending</code> row in <code>memberships</code>.
+        Talks to <code>POST /vtcs/:id/invite</code>, <code>POST /vtcs/:id/join</code>, and
+        <code>POST /memberships/:id/approve</code>.</p>
+    </div>
+  </div>
+
+  <div class="container section">
+    <p><a href="index.html">&larr; Back to dashboard</a> · <a href="vtc-manage.html">Manage a VTC &rarr;</a></p>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div class="explainer warning">
+      <strong>Cross-node consideration:</strong> the invite string encodes the community's real DID plus
+      this utility-server's own libp2p peerId/multiaddrs — decodable by any node type (including the
+      agent/TUI node) using the shared OOBI codec. What is <em>not</em> yet wired up: a remote node that
+      decodes an invite still has no cross-node message to carry a join request <em>into</em> this node's
+      <code>memberships</code> table — today a join request only lands here if the applicant's identity
+      already exists as a local <code>identities</code> row on <strong>this</strong> node. Likewise, an
+      approval decision made here isn't pushed back out over TSP to the requester's own node. Two nodes'
+      local views of the same membership can silently diverge until a real RFI/RFA-style membership
+      message type exists. See <code>utility-server/src/routes/layer5-applications/vtc-invite.ts</code>.
+    </div>
+
+    <div class="two-col">
+      <div>
+        <div class="card">
+          <h3>1. Generate an Invite (as a community admin)</h3>
+          <div class="field">
+            <label for="invite-vtc-select">Community (VTC / VTN)</label>
+            <select id="invite-vtc-select"></select>
+          </div>
+          <div class="field">
+            <label for="invite-vta-select">Prospective Member (VTA)</label>
+            <select id="invite-vta-select"></select>
+            <div class="hint">Optional — leave unset for a bare shareable OOBI. Select a member to mint a signed VIC (InvitationCredential).</div>
+          </div>
+          <button class="btn btn-primary" id="generate-invite-btn">Generate Invite &rarr;</button>
+
+          <div id="invite-result" class="mt-md" style="display:none;">
+            <div class="key-card">
+              <div class="key-label">Shareable Invite String</div>
+              <div id="invite-string"></div>
+            </div>
+            <p class="text-muted" style="font-size:0.82rem;">
+              Community DID: <code id="invite-community-did"></code>
+            </p>
+            <p class="text-muted" style="font-size:0.82rem;" id="invite-vic-status"></p>
+            <button class="btn btn-outline btn-sm" id="copy-invite-btn">Copy to Clipboard</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>2. Join a Community (as a prospective member)</h3>
+          <form id="join-form">
+            <div class="field">
+              <label for="join-vta-select">Your Identity (VTA)</label>
+              <select id="join-vta-select"></select>
+            </div>
+            <div class="field">
+              <label for="join-vtc-select">Target Community</label>
+              <select id="join-vtc-select"></select>
+              <div class="hint">Pick the community the invite below was minted for — the server 409s if they don't match.</div>
+            </div>
+            <div class="field">
+              <label for="join-invite">Invite String <span style="color:#fbbf24;">(required for cross-node joins)</span></label>
+              <input type="text" id="join-invite" placeholder="Paste an invite string, or leave blank to request directly">
+            </div>
+            <div class="field">
+              <label for="join-role">Requested Role</label>
+              <select id="join-role">
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+                <option value="founding_admin">Founding Admin</option>
+                <option value="moderator">Moderator</option>
+                <option value="issuer">Issuer</option>
+              </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Submit Join Request &rarr;</button>
+          </form>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h3>Pending Join Requests</h3>
+          <p class="text-muted" style="font-size:0.85rem;">Every membership across all communities currently
+            in <code>status=pending</code> — approve or reject them here, or head to
+            <a href="vtc-manage.html">Manage a VTC</a> for the full per-community roster view.</p>
+          <button class="btn btn-outline btn-sm mb-md" id="refresh-pending-btn">Refresh</button>
+          <div id="pending-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">P2P Trust Stack — utility-server UI</div>
+  </footer>
+
+  <script>
+    let vtcs = [];
+    let vtas = [];
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    function showError(message) {
+      const el = document.getElementById('error');
+      el.style.display = 'block';
+      el.textContent = message;
+    }
+
+    function clearError() {
+      document.getElementById('error').style.display = 'none';
+    }
+
+    async function loadVtcs() {
+      try {
+        const res = await fetch('/vtcs');
+        if (!res.ok) throw new Error(`GET /vtcs failed: ${res.status}`);
+        vtcs = await res.json();
+        const options = vtcs.length
+          ? vtcs.map((v) => `<option value="${v.identity.uuid}">${escapeHtml(v.identity.name || '(unnamed)')} (#${v.identity.uuid.slice(0, 8)}, ${v.identity.role})</option>`).join('')
+          : '<option value="">No communities yet — create one first</option>';
+        document.getElementById('invite-vtc-select').innerHTML = options;
+        document.getElementById('join-vtc-select').innerHTML = options;
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    async function loadVtas() {
+      try {
+        const res = await fetch('/identities?role=vta&subject_kind=human');
+        if (!res.ok) throw new Error(`GET /identities failed: ${res.status}`);
+        vtas = await res.json();
+        document.getElementById('join-vta-select').innerHTML = vtas.length
+          ? vtas.map((v) => `<option value="${v.uuid}">${escapeHtml(v.name || v.uuid)} (${escapeHtml((v.did||'').slice(0, 14))}…)</option>`).join('')
+          : '<option value="">No eligible VTAs registered yet</option>';
+        const inviteSel = document.getElementById('invite-vta-select');
+        if (inviteSel) inviteSel.innerHTML = document.getElementById('join-vta-select').innerHTML;
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    document.getElementById('generate-invite-btn').addEventListener('click', async function () {
+      clearError();
+      const vtcId = document.getElementById('invite-vtc-select').value;
+      if (!vtcId) return;
+      const subjectIdentityUuid = document.getElementById('invite-vta-select').value;
+      try {
+        const res = await fetch(`/vtcs/${vtcId}/invite`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(subjectIdentityUuid ? { subjectIdentityUuid } : {}),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error?.message || `POST /vtcs/:id/invite failed: ${res.status}`);
+        document.getElementById('invite-string').textContent = body.invite;
+        document.getElementById('invite-community-did').textContent = body.communityDid;
+        document.getElementById('invite-vic-status').textContent = body.signed
+          ? `✓ Signed VIC minted (credential ${(body.credentialUuid || '').slice(0, 8)})`
+          : 'No signed VIC minted — select a prospective member, or the community signing key is unavailable.';
+        document.getElementById('invite-result').style.display = 'block';
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    document.getElementById('copy-invite-btn').addEventListener('click', function () {
+      const text = document.getElementById('invite-string').textContent;
+      navigator.clipboard?.writeText(text).catch(() => {});
+      const btn = document.getElementById('copy-invite-btn');
+      const original = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = original; }, 1200);
+    });
+
+    document.getElementById('join-form').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      clearError();
+      const memberIdentityUuid = document.getElementById('join-vta-select').value;
+      const vtcId = document.getElementById('join-vtc-select').value;
+      const invite = document.getElementById('join-invite').value.trim();
+      const role = document.getElementById('join-role').value.trim();
+      if (!memberIdentityUuid || !vtcId) return;
+
+      const payload = { memberIdentityUuid };
+      if (invite) payload.invite = invite;
+      if (role) payload.role = role;
+
+      try {
+        const res = await fetch(`/vtcs/${vtcId}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error?.message || `POST /vtcs/:id/join failed: ${res.status}`);
+        document.getElementById('join-form').reset();
+        await loadPending();
+      } catch (err) {
+        showError(err.message);
+      }
+    });
+
+    async function loadPending() {
+      const el = document.getElementById('pending-list');
+      try {
+        const res = await fetch('/memberships?status=pending');
+        if (!res.ok) throw new Error(`GET /memberships failed: ${res.status}`);
+        const pending = await res.json();
+
+        if (pending.length === 0) {
+          el.innerHTML = '<p class="text-muted">No pending join requests.</p>';
+          return;
+        }
+
+        el.innerHTML = pending.map((m) => `
+          <div class="entity-row">
+            <div>
+              <div class="name">Member #${m.memberIdentityUuid.slice(0, 8)} &rarr; Community #${m.communityIdentityUuid.slice(0, 8)}</div>
+              <div class="meta">membership #${m.uuid.slice(0, 8)} · role: ${escapeHtml(m.role || 'member')} · <span class="badge badge-warning">pending</span></div>
+            </div>
+            <span class="spacer"></span>
+            <button class="btn btn-sm btn-primary" data-approve="${m.uuid}">Approve</button>
+            <button class="btn btn-sm btn-danger" data-reject="${m.uuid}">Reject</button>
+          </div>
+        `).join('');
+
+        el.querySelectorAll('[data-approve]').forEach((btn) => {
+          btn.addEventListener('click', async function () {
+            const id = this.getAttribute('data-approve');
+            try {
+              const res = await fetch(`/memberships/${id}/approve`, { method: 'POST' });
+              const body = await res.json();
+              if (!res.ok) throw new Error(body?.error?.message || `approve failed: ${res.status}`);
+              loadPending();
+            } catch (err) {
+              showError(err.message);
+            }
+          });
+        });
+
+        el.querySelectorAll('[data-reject]').forEach((btn) => {
+          btn.addEventListener('click', async function () {
+            const id = this.getAttribute('data-reject');
+            try {
+              const res = await fetch(`/memberships/${id}/reject`, { method: 'POST' });
+              const body = await res.json();
+              if (!res.ok) throw new Error(body?.error?.message || `reject failed: ${res.status}`);
+              loadPending();
+            } catch (err) {
+              showError(err.message);
+            }
+          });
+        });
+      } catch (err) {
+        showError(err.message);
+      }
+    }
+
+    document.getElementById('refresh-pending-btn').addEventListener('click', loadPending);
+
+    loadVtcs();
+    loadVtas();
+    loadPending();
+  </script>
+
+</body>
+
+</html>

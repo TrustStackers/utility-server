@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>Sign In with Your VTA</h1>
+      <p>Authenticate using your VTA identity via Ed25519 challenge-response. Use your Agent App or CLI to sign the nonce.</p>
+    </div>
+  </div>
+  <div class="container section">
+    <p><a href="index.html">&larr; Back to dashboard</a></p>
+    <div id="error" class="error-banner" style="display:none;"></div>
+    <div id="success" class="success-banner" style="display:none;background:#065f46;color:#6ee7b7;padding:1rem;border-radius:8px;"></div>
+    <div class="card" style="max-width:540px;">
+      <h3>Step 1: Select Your Identity</h3>
+      <div class="field">
+        <label for="identity-select">VTA Identity</label>
+        <select id="identity-select"><option value="">Loading…</option></select>
+        <div id="identity-manual" style="display:none;margin-top:0.5rem;">
+          <input id="identity-uuid" type="text" placeholder="Paste your VTA identity UUID"
+                 style="font-family:monospace;width:100%;">
+          <p class="text-muted" id="identity-note" style="font-size:0.8em;margin-top:0.35rem;">
+            This node's VTA list is normally a pull-down. If it could not be loaded, enter the
+            identity UUID directly — it is shown when the utility server starts, and in your
+            Agent App.
+          </p>
+        </div>
+      </div>
+      <h3 style="margin-top:1.5rem;">Step 2: Get a Challenge</h3>
+      <div class="field">
+        <button type="button" class="btn btn-primary" onclick="requestChallenge()">Get Challenge Nonce</button>
+      </div>
+      <div id="challenge-box" style="display:none;margin-top:0.5rem;">
+        <label>Nonce (sign this):</label>
+        <textarea id="nonce-display" readonly rows="2" style="font-family:monospace;font-size:0.85em;width:100%;"></textarea>
+      </div>
+      <h3 style="margin-top:1.5rem;">Step 3: Paste Signature</h3>
+      <p class="text-muted" style="font-size:0.85em;">Sign the nonce with your Ed25519 key, paste the base64 signature:</p>
+      <div class="field">
+        <textarea id="signature-input" rows="3" placeholder="Paste base64 Ed25519 signature…" style="font-family:monospace;"></textarea>
+      </div>
+      <button type="button" class="btn btn-primary" id="verify-btn" onclick="verifySignature()" disabled>Verify & Sign In</button>
+    </div>
+  </div>
+  <script>
+    let nonce=null, identityUuid=null;
+    const err=id=>{const e=document.getElementById(id);return{show:m=>{e.style.display='block';e.textContent=m;},hide:()=>e.style.display='none'}};
+    const error=err('error'), success=err('success');
+    async function load(){
+      const s=document.getElementById('identity-select');
+      // Pre-fill from ?identityUuid=… so an operator can be handed a direct link.
+      const fromQuery=new URLSearchParams(location.search).get('identityUuid');
+      if(fromQuery)document.getElementById('identity-uuid').value=fromQuery;
+      try{
+        // /auth/candidates is this page's OWN picker source, and it is public for a
+        // specific reason: /identities is session-protected (F-011 — it discloses how
+        // many identities exist), and this page cannot have a session yet. The
+        // endpoint returns human VTAs only, name/uuid/did only.
+        const r=await fetch('/auth/candidates');
+        if(!r.ok){showManualEntry('Could not list this node\'s VTAs ('+r.status+') — enter the identity UUID directly.');return}
+        const c=await r.json();
+        if(!c.length){showManualEntry('No human VTAs are registered on this node yet.');return}
+        s.innerHTML=c.map(v=>`<option value="${v.uuid}">${v.name||'(unnamed)'}${v.did?' — '+v.did.slice(0,16)+'…':''}</option>`).join('')
+      }catch(e){showManualEntry('Could not load the VTA list: '+e.message)}
+    }
+    function showManualEntry(note){
+      const sel=document.getElementById('identity-select');
+      const box=document.getElementById('identity-manual');
+      if(!box)return;
+      sel.style.display='none';
+      box.style.display='block';
+      if(note){const p=document.getElementById('identity-note');if(p)p.textContent=note}
+    }
+    /** The identity to authenticate as: the manual field wins when it is in use. */
+    function chosenIdentityUuid(){
+      const manual=document.getElementById('identity-uuid');
+      const sel=document.getElementById('identity-select');
+      const manualShown=document.getElementById('identity-manual').style.display!=='none';
+      const manualValue=manual&&manual.value?manual.value.trim():'';
+      if(manualShown&&manualValue)return manualValue;
+      return sel&&sel.value?sel.value.trim():manualValue
+    }
+    async function requestChallenge(){
+      identityUuid=chosenIdentityUuid();
+      if(!identityUuid)return error.show('Select or paste a VTA identity first.');
+      error.hide();
+      try{
+        const r=await fetch('/auth/challenge',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identityUuid})});
+        const b=await r.json();
+        if(!r.ok)throw new Error(b.error?.message||'Failed');
+        nonce=b.nonce;
+        document.getElementById('nonce-display').value=nonce;
+        document.getElementById('challenge-box').style.display='block';
+        document.getElementById('verify-btn').disabled=false
+      }catch(e){error.show(e.message)}
+    }
+    async function verifySignature(){
+      const sig=document.getElementById('signature-input').value.trim();
+      if(!sig)return error.show('Paste your signature first.');
+      error.hide();
+      try{
+        const r=await fetch('/auth/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({identityUuid,nonce,signature:sig})});
+        const b=await r.json();
+        if(!r.ok)throw new Error(b.error?.message||'Failed');
+        if(!b.valid)throw new Error(b.reason||'Invalid signature');
+        // Verify session is established before redirecting
+        success.show('Verifying session...');
+        fetch('/auth/status').then(function(r){return r.json()}).then(function(s){
+          if(s.authenticated){
+            success.show('Signed in! Redirecting...');
+            setTimeout(function(){location.href='index.html'},500);
+          }else{
+            error.show('Session not established. Try again.');
+            document.getElementById('verify-btn').disabled=false;
+          }
+        }).catch(function(e){error.show('Auth check failed: '+e.message);document.getElementById('verify-btn').disabled=false});
+      }catch(e){error.show(e.message);document.getElementById('verify-btn').disabled=false}
+    }
+    load();
+    // Redirect to dashboard if already logged in
+    fetch('/auth/status')
+      .then(function(r) { return r.json(); })
+      .then(function(s) { if (s.authenticated) location.href = 'index.html'; })
+      .catch(function() {});
+  </script>
+</body>
+</html>

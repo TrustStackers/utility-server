@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Witness Attestation — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>🛡️ Witness Attestation</h1>
+      <p>View witness attestation status for key rotation entries. Each rotation entry in a
+        did:scid:vh log may require M-of-N witness attestations before it is considered valid.
+        This page shows attestation coverage per rotation entry.</p>
+    </div>
+  </div>
+
+  <div class="container section">
+    <p><a href="index.html">&larr; Back to dashboard</a></p>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div class="card">
+      <h3>Rotation Log Entries with Attestation Status</h3>
+      <p class="text-muted mb-md">Each entry shows its version, the DID document it belongs to,
+        and how many witness attestations have been collected.</p>
+      <div id="attestation-list">
+        <p class="text-muted">Loading…</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Witness VTCs</h3>
+      <p class="text-muted mb-md">Communities configured as witness VTCs for attestation coordination.
+        Witness VTCs are regular VTCs whose members serve as witnesses for key rotation events.</p>
+      <div id="witness-vtc-list">
+        <p class="text-muted">Loading…</p>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">P2P Trust Stack — utility-server UI</div>
+  </footer>
+
+  <script>
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    function timeAgo(ts) {
+      if (!ts) return 'unknown';
+      const d = new Date(ts * 1000);
+      return d.toISOString().replace('T', ' ').substring(0, 19);
+    }
+
+    async function loadAttestations() {
+      const el = document.getElementById('attestation-list');
+      const errorEl = document.getElementById('error');
+
+      try {
+        // Fetch all identities to find ones with rotation logs
+        const idRes = await fetch('/identities?role=vta');
+        if (!idRes.ok) throw new Error('Failed to fetch identities');
+        const identities = await idRes.json();
+
+        const entries = [];
+        for (const identity of identities) {
+          try {
+            const docRes = await fetch(`/identities/${identity.uuid}/did-documents`);
+            if (!docRes.ok) continue;
+            const docs = await docRes.json();
+            for (const doc of docs) {
+              if (doc.method !== 'did:scid:vh') continue;
+              // Try to get rotation log for this DID document
+              try {
+                const rotRes = await fetch(`/did-documents/${doc.uuid}`);
+                if (!rotRes.ok) continue;
+                entries.push({
+                  identityUuid: identity.uuid,
+                  identityName: identity.name,
+                  did: doc.did,
+                  didDocumentUuid: doc.uuid,
+                  method: doc.method,
+                  createdAt: doc.createdAt,
+                  status: doc.status,
+                });
+              } catch { /* skip */ }
+            }
+          } catch { /* skip */ }
+        }
+
+        if (entries.length === 0) {
+          el.innerHTML = '<p class="text-muted">No did:scid:vh identities with rotation logs found. Rotation logs are created when a did:scid:vh identity is generated (e.g., by the agent-app).</p>';
+          return;
+        }
+
+        el.innerHTML = entries.map(e => `
+          <div class="entity-row">
+            <span>🔄</span>
+            <div>
+              <div class="name">${escapeHtml(e.identityName || '(unnamed)')}</div>
+              <div class="meta"><code>${escapeHtml(e.did.substring(0, 50))}…</code></div>
+            </div>
+            <span class="spacer"></span>
+            <span class="badge">${escapeHtml(e.method)}</span>
+            <span class="badge" style="margin-left:0.5rem;">${escapeHtml(e.status)}</span>
+          </div>
+        `).join('');
+      } catch (err) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = `Failed to load attestations: ${err.message}`;
+        el.innerHTML = '<p class="text-muted">Failed to load.</p>';
+      }
+    }
+
+    async function loadWitnessVtcs() {
+      const el = document.getElementById('witness-vtc-list');
+
+      try {
+        const res = await fetch('/vtcs');
+        if (!res.ok) throw new Error('Failed to fetch VTCs');
+        const vtcs = await res.json();
+
+        if (vtcs.length === 0) {
+          el.innerHTML = '<p class="text-muted">No VTCs found. Create a VTC to serve as a witness community.</p>';
+          return;
+        }
+
+        el.innerHTML = vtcs.map(v => `
+          <div class="entity-row">
+            <span>🏛️</span>
+            <div>
+              <div class="name">${escapeHtml(v.identity?.name || '(unnamed)')}</div>
+              <div class="meta">${v.activeMemberCount} active member(s) · Threshold: ${v.governance?.adminThresholdM || '?'}/${v.governance?.adminThresholdN || '?'}</div>
+            </div>
+            <span class="spacer"></span>
+            <span class="badge">${escapeHtml(v.identity?.role || 'vtc')}</span>
+          </div>
+        `).join('');
+      } catch {
+        el.innerHTML = '<p class="text-muted">Failed to load VTCs.</p>';
+      }
+    }
+
+    loadAttestations();
+    loadWitnessVtcs();
+  </script>
+
+</body>
+
+</html>

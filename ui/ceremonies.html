@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ceremony Task Log — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .ceremony-group { margin-bottom: var(--space-lg); }
+    .ceremony-group > summary {
+      cursor: pointer; font-weight: 700; font-size: 1.05rem;
+      color: var(--color-heading); padding: var(--space-sm) 0;
+    }
+    .ceremony-group > summary .count { font-weight: 400; color: var(--color-text-muted); font-size: 0.85rem; }
+    .run { border: 1px solid var(--color-border); border-radius: var(--radius); margin-bottom: var(--space-sm); background: var(--color-surface); }
+    .run > summary {
+      cursor: pointer; padding: var(--space-sm) var(--space-md);
+      display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap;
+    }
+    .run > summary .run-time { color: var(--color-text-muted); font-size: 0.82rem; }
+    .run-body { padding: 0 var(--space-md) var(--space-md); }
+    .steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+    .steps > li {
+      position: relative; padding: 0.45rem 0 0.45rem 2.4rem;
+      border-top: 1px solid var(--color-surface-alt); font-size: 0.9rem;
+    }
+    .steps > li::before {
+      counter-increment: step; content: counter(step);
+      position: absolute; left: 0; top: 0.5rem;
+      width: 1.6rem; height: 1.6rem; border-radius: 50%;
+      background: var(--color-accent-bg); color: var(--color-accent);
+      font-size: 0.75rem; font-weight: 700; display: flex;
+      align-items: center; justify-content: center;
+    }
+    .steps .step-meta { color: var(--color-text-muted); font-size: 0.78rem; font-family: var(--font-mono); }
+    .steps .tech > summary { cursor: pointer; color: var(--color-text-muted); font-size: 0.78rem; }
+    .steps pre {
+      background: var(--color-surface-alt); border: 1px solid var(--color-border);
+      border-radius: 4px; padding: var(--space-sm); overflow-x: auto;
+      font-family: var(--font-mono); font-size: 0.75rem; margin-top: 4px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>📜 Ceremony Task Log</h1>
+      <p>Every ceremony this utility server ran, and every step inside it, <strong>in the order it happened</strong>.
+        The network view: an operator here sees all ceremonies across the network, where an agent app shows only the
+        communities that agent belongs to.</p>
+    </div>
+  </div>
+
+  <div class="container section">
+    <p><a href="index.html">&larr; Back to dashboard</a></p>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div class="card">
+      <h3>How to read a step</h3>
+      <p class="text-muted" style="font-size:0.88rem;">
+        <span class="arrow">→ request</span> is what an actor asked for;
+        <span class="arrow">← response</span> is what the stack decided or did about it.
+        A <span class="badge badge-success">allowed</span> badge means a policy gate said yes,
+        <span class="badge badge-danger">denied</span> means it refused (expand the step to see why),
+        and <span class="badge">completed</span> means the work was done.
+      </p>
+      <p class="text-muted" style="font-size:0.88rem;margin-top:0.5rem;">
+        Steps are shown in record order. A ceremony appears once its first step has been recorded.
+      </p>
+    </div>
+
+    <div id="ceremony-list">
+      <p class="text-muted">Loading…</p>
+    </div>
+  </div>
+
+  <script>
+  'use strict';
+
+  // ── Plain-language vocabulary ─────────────────────────────────────────────
+  // A ceremony STEP is identified by a technical task `type` — the same identifiers the
+  // catalog seeds (`trust_task_templates.type`). The sentence is what a reader who is
+  // not a developer needs in order to follow a run; the raw type and payload stay
+  // behind "technical detail". `{…}` placeholders are filled from the step's own payload.
+  //
+  // NOTE: the agent app renders the same wording in agent-app/web/communities.html.
+  // The two apps are separate static bundles with their own palettes, so the wording is
+  // duplicated by design; if it starts to drift, lift it into the catalog's template
+  // (each row already carries a short `name`) and have both read it from the API.
+  // NOTE: there is deliberately NO label vocabulary here. Every ceremony title, ceremony
+  // description, step label and step sentence comes from the DATABASE — the API returns
+  // `ceremonyLabel` / `ceremonyDescription` and each step's `display`, straight from the
+  // catalog rows (`ceremony_templates.template`, `trust_task_templates.template`). A
+  // developer adding a ceremony writes its wording in the catalog; no change is needed
+  // here, and there is no second copy of the wording to drift out of step.
+
+  /** The ceremony's own title, from its catalog row; falls back to its name. */
+  function ceremonyTitle(group) {
+    return group.label || group.name || 'Other trust tasks';
+  }
+
+  /** 'task:p2pts:credential:onboarding-vmc:0.1' → 'Credential · onboarding vmc'. */
+  function humanType(type) {
+    var parts = String(type || '').split(':');
+    if (parts.length < 5) return String(type || '');
+    var family = parts[2];
+    return family.charAt(0).toUpperCase() + family.slice(1) + ' · ' + parts.slice(3, -1).join(':').replace(/-/g, ' ');
+  }
+
+  function esc(value) {
+    var d = document.createElement('div');
+    d.textContent = value === undefined || value === null ? '' : String(value);
+    return d.innerHTML;
+  }
+
+  async function apiGet(path) {
+    var res = await fetch(path);
+    var body = await res.json().catch(function () { return null; });
+    if (!res.ok) throw new Error((body && body.error && body.error.message) || ('HTTP ' + res.status));
+    return body;
+  }
+
+  function fillWords(text, facts) {
+    return String(text).replace(/\{(\w+)\}/g, function (_, key) {
+      var value = facts[key];
+      return (value === undefined || value === null) ? '—' : String(value);
+    });
+  }
+
+  /** The payload, with an effect step's `{ result: … }` unwrapped over the top. */
+  function stepFacts(step) {
+    var payload = (step.payload && typeof step.payload === 'object') ? step.payload : {};
+    var result = (payload.result && typeof payload.result === 'object') ? payload.result : {};
+    var facts = Object.assign({}, payload, result);
+    if (Array.isArray(payload.adminUuids)) facts.adminCount = payload.adminUuids.length;
+    return facts;
+  }
+
+  /**
+   * One plain-language line for a step, from the step's OWN catalog wording (returned as
+   * `display`). A type with no catalog row falls back to a decorated form of its
+   * identifier rather than showing nothing.
+   */
+  function describeStep(step) {
+    var wording = step.display || {};
+    var facts = stepFacts(step);
+    var label = wording.label || humanType(step.type);
+    var sentence = wording[step.direction]
+      ? fillWords(wording[step.direction], facts)
+      : (step.direction === 'request' ? 'Requested: ' : 'Completed: ') + humanType(step.type).toLowerCase() + '.';
+    // A refusal is the interesting case — never hide why.
+    if (step.status === 'denied') sentence += facts.reason ? ' Refused: ' + facts.reason : ' Refused.';
+    return { label: label, sentence: sentence };
+  }
+
+  function statusBadge(status) {
+    var cls = 'badge';
+    if (status === 'allowed' || status === 'completed') cls += ' badge-success';
+    else if (status === 'denied' || status === 'failed') cls += ' badge-danger';
+    else if (status === 'pending') cls += ' badge-warning';
+    return '<span class="' + cls + '">' + esc(status || 'recorded') + '</span>';
+  }
+
+  function fmtTime(seconds) {
+    if (!seconds) return '';
+    var d = new Date(seconds * 1000);
+    return isNaN(d.getTime()) ? '' : d.toLocaleString();
+  }
+
+  // ── Rendering ─────────────────────────────────────────────────────────────
+
+  /** Runs whose steps have already been fetched (so a re-expand is instant). */
+  var loadedRuns = {};
+
+  function renderThreads(threads) {
+    var list = document.getElementById('ceremony-list');
+    if (!threads.length) {
+      list.innerHTML = '<div class="card"><p class="text-muted">No ceremonies recorded yet. ' +
+        'Found a community, invite someone, or onboard a member and its steps will appear here.</p></div>';
+      return;
+    }
+
+    // Group by ceremony, keeping the API's newest-first order for both. The heading and
+    // the one-line description come from the ceremony's catalog row (via its runs).
+    var groups = [];
+    var byName = {};
+    threads.forEach(function (thread) {
+      var key = thread.ceremony || '';
+      if (!byName[key]) {
+        byName[key] = {
+          name: key,
+          label: thread.ceremonyLabel,
+          description: thread.ceremonyDescription,
+          runs: [],
+        };
+        groups.push(byName[key]);
+      }
+      byName[key].runs.push(thread);
+    });
+
+    list.innerHTML = groups.map(function (group) {
+      var runsHtml = group.runs.map(function (run) {
+        var shortId = String(run.threadId).slice(0, 8);
+        var badges = (run.statuses || []).map(statusBadge).join(' ');
+        return '<details class="run" data-thread="' + esc(run.threadId) + '">' +
+          '<summary>' +
+          '<span style="font-family:var(--font-mono);font-size:0.8rem;">' + esc(shortId) + '</span>' +
+          '<strong>' + esc(fmtTime(run.lastAt)) + '</strong>' +
+          '<span class="run-time">' + run.documentCount + ' document(s)</span>' +
+          badges +
+          '</summary>' +
+          '<div class="run-body"><p class="text-muted">Loading steps…</p></div>' +
+          '</details>';
+      }).join('');
+
+      return '<details class="ceremony-group" open>' +
+        '<summary>' + esc(ceremonyTitle(group)) +
+        ' <span class="count">(' + group.runs.length + ' run(s) · ' +
+        esc(group.name || 'unclassified') + ')</span></summary>' +
+        (group.description
+          ? '<p class="text-muted" style="font-size:0.85rem; margin:0 0 0.5rem 0;">' + esc(group.description) + '</p>'
+          : '') +
+        runsHtml + '</details>';
+    }).join('');
+
+    // Lazy-load a run's steps the first time it is expanded.
+    Array.prototype.forEach.call(list.querySelectorAll('details.run'), function (el) {
+      el.addEventListener('toggle', function () {
+        if (!el.open) return;
+        var threadId = el.getAttribute('data-thread');
+        if (loadedRuns[threadId]) return;
+        loadedRuns[threadId] = true;
+        loadRun(el, threadId);
+      });
+    });
+  }
+
+  async function loadRun(el, threadId) {
+    var body = el.querySelector('.run-body');
+    try {
+      var data = await apiGet('/trust-tasks/' + encodeURIComponent(threadId));
+      var tasks = (data && data.tasks) || [];
+      if (!tasks.length) {
+        body.innerHTML = '<p class="text-muted">No steps recorded for this ceremony.</p>';
+        return;
+      }
+      body.innerHTML = '<ol class="steps">' + tasks.map(function (step) {
+        var described = describeStep(step);
+        var arrow = step.direction === 'request' ? '→' : '←';
+        var who = step.issuerDid || step.recipientDid || '';
+        if (String(who).length > 28) who = String(who).slice(0, 28) + '…';
+        return '<li>' +
+          '<div><strong>' + esc(described.label) + '</strong> ' + statusBadge(step.status) + '</div>' +
+          '<div>' + esc(described.sentence) + '</div>' +
+          '<div class="step-meta">' + arrow + ' ' + esc(step.direction) +
+          (who ? ' · ' + esc(who) : '') +
+          (step.createdAt ? ' · ' + esc(fmtTime(step.createdAt)) : '') + '</div>' +
+          '<details class="tech"><summary>technical detail</summary>' +
+          '<div style="font-size:0.78rem;margin-top:4px;"><code>' + esc(step.type) + '</code></div>' +
+          '<pre>' + esc(JSON.stringify(step.payload, null, 2)) + '</pre>' +
+          '</details>' +
+          '</li>';
+      }).join('') + '</ol>';
+    } catch (err) {
+      body.innerHTML = '<p style="color:var(--color-danger)">Could not load this ceremony: ' +
+        esc(err.message) + '</p>';
+    }
+  }
+
+  async function loadCeremonies() {
+    var list = document.getElementById('ceremony-list');
+    var banner = document.getElementById('error');
+    banner.style.display = 'none';
+    try {
+      var data = await apiGet('/trust-tasks/threads');
+      renderThreads((data && data.threads) || []);
+    } catch (err) {
+      list.innerHTML = '';
+      banner.textContent = 'Could not load the ceremony task log: ' + err.message;
+      banner.style.display = 'block';
+    }
+  }
+
+  loadCeremonies();
+  </script>
+</body>
+
+</html>

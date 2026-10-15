@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P2PTS Utility Server — Trust Task Services</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>P2P Trust Stack — Trust Task Services</h1>
+      <p>Namespace-scoped infrastructure for name registration, VTC governance, VRC issuance,
+        witness attestation coordination, event archiving, and recovery backups.
+        Backed by YugabyteDB for serializable transaction isolation.</p>
+      <p style="margin-top:0.5rem;">
+        <strong>Namespace:</strong> <span id="ns-status">—</span>
+      </p>
+      <p style="margin-top:0.5rem;">
+        <span id="auth-status">🔐 <a href="login.html" style="color:#93c5fd;">Sign In with VTA</a></span>
+        <span id="auth-logout" style="display:none;margin-left:1rem;">
+          <a href="#" onclick="logout()" style="color:#93c5fd;">Sign Out</a>
+        </span>
+      </p>
+    </div>
+  </div>
+
+  <div class="container section">
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div class="summary-grid" id="summary-grid">
+      <div class="summary-card"><div class="num">—</div><div class="label">Registered Names</div></div>
+      <div class="summary-card"><div class="num">—</div><div class="label">Active VTCs</div></div>
+      <div class="summary-card"><div class="num">—</div><div class="label">Credentials Issued</div></div>
+      <div class="summary-card"><div class="num">—</div><div class="label">VTAs in Namespace</div></div>
+    </div>
+
+    <div class="card">
+      <h3>📛 Name Registry</h3>
+      <p class="text-muted mb-md">Human-readable names bound to SCIDs via alsoKnownAs. Serializable unique
+        constraints in YugabyteDB prevent double-registration.</p>
+      <a class="btn btn-primary" href="names.html">Browse Names</a>
+    </div>
+
+    <div class="card auth-required" style="display:none;">
+      <h3>🏛️ VTC Governance</h3>
+      <p class="text-muted mb-md">Create and manage Verified Trust Communities with M-of-N admin co-signing
+        thresholds, membership lifecycle, and nested VTN hierarchies.</p>
+      <a class="btn btn-primary" href="vtc-create.html">+ Create a VTC</a>
+      <a class="btn btn-outline" href="vtc-invite-join.html">🤝 Invite & Join</a>
+      <a class="btn btn-outline" href="vtc-manage.html">🛠️ Manage</a>
+      <a class="btn btn-outline" href="ceremonies.html">🧭 Ceremony Task Log</a>
+      <a class="btn btn-outline" href="vtn-network.html">🕸️ VTN Network</a>
+      <a class="btn btn-outline" href="vtn-network.html#network-rules">📜 Network Rules</a>
+    </div>
+
+    <div class="card auth-required" style="display:none;">
+      <h3>📜 Credentials</h3>
+      <p class="text-muted mb-md">Issue and verify VRCs (Verified Relationship Credentials), VMCs (Membership
+        Credentials), and other credential types with M-of-N co-signing.</p>
+      <a class="btn btn-primary" href="vrc-issue-verify.html">Issue & Verify VRCs</a>
+    </div>
+
+    <div class="card auth-required" style="display:none;">
+      <h3>👤 Identity Browser</h3>
+      <p class="text-muted mb-md">Browse VTAs, VTCs, and VTNs in this namespace. View profiles, memberships,
+        delegations, and grants for any identity.</p>
+      <a class="btn btn-outline" href="profiles.html">👤 Manage Profiles</a>
+    </div>
+
+    <div class="card">
+      <h3>📋 Event Archive</h3>
+      <p class="text-muted mb-md">Append-only trust event log: rotation entries, witness attestations,
+        membership changes, credential events. Filterable by identity, VTC, and time range.</p>
+      <a class="btn btn-primary" href="events.html">Browse Events</a>
+    </div>
+
+    <div class="card">
+      <h3>🛡️ Witness Attestation</h3>
+      <p class="text-muted mb-md">View pending attestation requests, attestation log, and M-of-N status
+        per rotation entry for witness-coordinated key rotation.</p>
+      <a class="btn btn-primary" href="witness.html">View Attestations</a>
+    </div>
+
+    <div class="card auth-required" style="display:none;">
+      <h3>💾 Recovery & Backup</h3>
+      <p class="text-muted mb-md">Backed-up identity state: keys, DID documents, relationships.
+        Restore from backup or push agent identities for recovery.</p>
+      <a class="btn btn-primary" href="recovery.html">Recovery Status</a>
+    </div>
+
+    <div class="card auth-required" style="display:none;">
+      <h3>🌐 Namespace Management</h3>
+      <p class="text-muted mb-md">View namespace configuration, registered name count, and namespace
+        admin identities. Manage multi-namespace deployments.</p>
+      <a class="btn btn-primary" href="namespace.html">Manage Namespace</a>
+      <a class="btn btn-outline" href="config.html">⚙️ Server Configuration</a>
+    </div>
+
+    <div class="card">
+      <h3>🕸️ Trust Graph Viewer</h3>
+      <p class="text-muted mb-md">Interactive DTG visualization of all trust relationships in this namespace — credentials, delegations, and community memberships.</p>
+      <a class="btn btn-primary" href="graph.html">View Trust Graph</a>
+    </div>
+
+    <div class="card">
+      <h3>🔗 did:scid:vh Resolver</h3>
+      <p class="text-muted mb-md">Public resolution surface for this node's did:scid:vh identities: look up a
+        DID document, its rotation log (JSON/JSONL), and an annotated resolution history. It runs on its
+        own public listener (port 8788), separate from this admin UI.</p>
+      <a class="btn btn-primary" id="resolver-link" href="http://localhost:8788/" target="_blank" rel="noopener noreferrer">Open DID Resolver</a>
+    </div>
+
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">P2P Trust Stack — utility-server UI &middot; Backed by YugabyteDB</div>
+  </footer>
+
+  <script>
+    // Set by auth check — true if user is logged in.
+    let isAuthenticated = false;
+
+    async function checkAuth() {
+      var statusEl = document.getElementById('auth-status');
+      var logoutEl = document.getElementById('auth-logout');
+      try {
+        var res = await fetch('/auth/status');
+        var status = await res.json();
+        isAuthenticated = status.authenticated;
+
+        if (status.authenticated) {
+          statusEl.innerHTML = '\u2705 Logged in as <strong>' + escapeHtml(status.name || 'VTA #' + status.identityUuid) + '</strong>';
+          if (logoutEl) logoutEl.style.display = 'inline';
+          var els = document.querySelectorAll('.auth-required');
+          for (var i = 0; i < els.length; i++) { els[i].style.display = ''; }
+        } else {
+          var els = document.querySelectorAll('.auth-required');
+          for (var i = 0; i < els.length; i++) { els[i].style.display = 'none'; }
+        }
+        return status.authenticated;
+      } catch (e) {
+        statusEl.innerHTML = '\u26A0\uFE0F Auth check failed: ' + escapeHtml(e.message || 'network error');
+      }
+    }
+
+    function escapeHtml(str) {
+      var div = document.createElement('div');
+      div.textContent = str || '';
+      return div.innerHTML;
+    }
+
+    async function logout() {
+      await fetch('/auth/logout', { method: 'POST' });
+      location.reload();
+    }
+
+    /**
+     * The dashboard counts come from a session-protected endpoint (F-011): it reports how
+     * much data this node holds, so it is deliberately no longer public. Being signed out
+     * is therefore a NORMAL state for this page — say so and offer the sign-in link,
+     * rather than surfacing a raw "401" as though something had failed.
+     */
+    function showSignInRequired() {
+      const grid = document.getElementById('summary-grid');
+      if (grid) {
+        grid.innerHTML =
+          '<div class="summary-card" style="grid-column:1/-1;">' +
+          '<div class="label">\uD83D\uDD10 Dashboard counts require a session — ' +
+          '<a href="login.html" style="color:#93c5fd;">Sign In with VTA</a></div>' +
+          '</div>';
+      }
+      const errorEl = document.getElementById('error');
+      if (errorEl) { errorEl.style.display = 'none'; errorEl.textContent = ''; }
+    }
+
+    /**
+     * The public did:scid:vh resolver listens on its own port (RESOLVER_PORT,
+     * default 8788) — a separate listener from this admin UI by design. Build the
+     * link from the host the operator is already using, so it is correct whether
+     * the dashboard was reached via localhost or a LAN/TLS-fronted host. This panel
+     * is deliberately NOT `.auth-required`, so it runs for anonymous visitors too.
+     */
+    function initResolverLink() {
+      var link = document.getElementById('resolver-link');
+      if (!link) return;
+      link.href = window.location.protocol + '//' + window.location.hostname + ':8788/';
+    }
+
+    async function loadSummary() {
+      const errorEl = document.getElementById('error');
+      try {
+        const res = await fetch('/dashboard/summary');
+        // F-011: session-protected by design. A 401 means "not signed in" — or a session
+        // that predates a restart that regenerated the session secret — not a failure.
+        if (res.status === 401) { showSignInRequired(); return; }
+        if (!res.ok) throw new Error(`GET /dashboard/summary failed: ${res.status}`);
+        const summary = await res.json();
+
+        const grid = document.getElementById('summary-grid');
+        grid.innerHTML = `
+          <div class="summary-card"><div class="num">${summary.names}</div><div class="label">Registered Names</div></div>
+          <div class="summary-card"><div class="num">${summary.vtcs}</div><div class="label">Active VTCs</div></div>
+          <div class="summary-card"><div class="num">${summary.vrcs + summary.otherCredentials}</div><div class="label">Credentials Issued</div></div>
+          <div class="summary-card"><div class="num">${summary.vtas}</div><div class="label">VTAs in Namespace</div></div>
+        `;
+      } catch (err) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = `Failed to load dashboard summary: ${err.message}`;
+      }
+    }
+
+    async function loadNamespaceStatus() {
+      const el = document.getElementById('ns-status');
+      try {
+        const res = await fetch('/namespace/status');
+        if (!res.ok) {
+          // A refused or failed read is NOT the same as "not configured" — rendering it
+          // so would state something false about this node (which is exactly the bug
+          // this line used to have, before /namespace/status was restored as a public read).
+          if (el) {
+            el.innerHTML = (res.status === 401 || res.status === 403)
+              ? '<a href="login.html" style="color:#93c5fd;">Sign in to view</a>'
+              : '<span style="color:#fbbf24;">unavailable (' + res.status + ')</span>';
+          }
+          return;
+        }
+        const ns = await res.json();
+        if (el) {
+          // Show the namespace as configured — it is exactly the string the operator typed
+          // (`p2pts`), NOT `vta:p2pts:`. That longer form is the AGENT-NAME prefix:
+          // names are `vta:<namespace>:<name>` (src/did/name-uri.ts), so it belongs in the
+          // hint about names, not in the value labelled "Namespace".
+          el.innerHTML = (ns && ns.namespace)
+            ? '<code>' + escapeHtml(ns.namespace) + '</code>' +
+              ' <span class="text-muted" style="font-size:.85em;">— agent names use <code>vta:' +
+              escapeHtml(ns.namespace) + ':&lt;name&gt;</code></span>'
+            : '<span style="color:#fbbf24;">not configured</span>';
+        }
+      } catch { /* ignore */ }
+    }
+
+    // The dashboard counts are session-protected (F-011), so ask for them only once the
+    // auth check confirms there is a session; otherwise show the sign-in prompt.
+    (async function boot() {
+      initResolverLink();
+      var authed = await checkAuth();
+      if (authed) { loadSummary(); } else { showSignInRequired(); }
+      loadNamespaceStatus();
+    })();
+  </script>
+
+</body>
+
+</html>

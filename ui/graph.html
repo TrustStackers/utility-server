@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trust Graph — P2PTS Utility Server</title>
+<link rel="stylesheet" href="style.css">
+<script src="/lib/cytoscape.min.js"></script>
+<style>
+  :root { --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #c9d1d9; --muted: #8b949e;
+           --blue: #58a6ff; --green: #3fb950; --amber: #d2991d; --purple: #bc8cff; --red: #f85149; --gray: #6e7681; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); }
+  .page-header { background: #1e3a5f; padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .page-header h1 { font-size: 18px; color: #93c5fd; }
+  .page-header a { color: #93c5fd; text-decoration: none; font-size: 13px; }
+  .page-header a:hover { text-decoration: underline; }
+  #main-content { display: flex; height: calc(100vh - 52px); }
+  #cy { flex: 1; min-width: 0; background: #0a0e17; }
+  #panel { width: 350px; background: var(--card); border-left: 1px solid var(--border); padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+  #panel h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .filter-group { display: flex; flex-direction: column; gap: 5px; }
+  .filter-group label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; color: var(--text); }
+  .filter-group input[type="checkbox"] { accent-color: var(--blue); }
+  .btn { padding: 7px 12px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; font-size: 12px; background: var(--card); color: var(--text); }
+  .btn:hover { background: #21262d; }
+  .btn-primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  .btn-primary:hover { background: #388bfd; }
+  #legend { font-size: 11px; color: var(--muted); line-height: 1.8; }
+  #legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+  #legend .sw-vrc { background: #3fb950; } #legend .sw-vmc { background: #58a6ff; } #legend .sw-vec { background: #bc8cff; }
+  #legend .sw-delegation { background: #f85149; } #legend .sw-other { background: #d2991d; }
+  #legend .sw-node-vta { background: #3b82f6; border-radius: 50%; }
+  /* Shape legend mirrors Cytoscape's node shapes: VTC = pentagon, VTN = hexagon. */
+  #legend .sw-node-vtc { background: #10b981; clip-path: polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%); }
+  #legend .sw-node-vtn { background: #f59e0b; clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%); }
+  #legend .sw-solid { display: inline-block; width: 20px; height: 0; border-top: 2px solid #8b949e; margin: 0 4px; vertical-align: middle; }
+  #info-card { font-size: 12px; background: #0d1117; border: 1px solid var(--border); border-radius: 6px; padding: 10px; display: none; }
+  #info-card .key { color: var(--muted); } #info-card .val { color: var(--text); font-family: monospace; word-break: break-all; }
+  #info-card pre { white-space: pre-wrap; word-break: break-word; font-family: monospace; font-size: 11px; color: var(--text); margin: 4px 0 0; }
+  .stats { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 12px; }
+  .stats strong { color: var(--text); }
+  .error-banner { background: #7f1d1d; color: #fca5a5; padding: 10px 14px; border-radius: 6px; display: none; font-size: 13px; }
+  .info-banner { background: #1e3a5f; color: #93c5fd; padding: 10px 14px; border-radius: 6px; display: none; font-size: 13px; line-height: 1.5; }
+  #search-input { width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px; background: #0d1117; color: var(--text); font-size: 13px; }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+  @media (max-width: 768px) { #main-content { flex-direction: column; } #panel { width: 100%; border-left: none; border-top: 1px solid var(--border); max-height: 55%; } }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+  <h1>🕸️ Decentralized Trust Graph (DTG) — Namespace View</h1>
+  <span style="flex:1;"></span>
+  <a href="index.html">&larr; Back to Dashboard</a>
+</div>
+
+<div id="main-content">
+  <div id="cy"></div>
+  <div id="panel">
+    <div id="error" class="error-banner"></div>
+    <div id="info-banner" class="info-banner">
+      No trust edges exist in this namespace yet. VTAs are shown as standalone nodes.
+      Trust edges appear when credentials (VRCs, VMCs, VECs) are issued or delegations are created.
+      <a href="vrc-issue-verify.html" style="color:#93c5fd;">Issue a VRC →</a>
+    </div>
+    <div class="stats" id="stats">
+      <span>Nodes: <strong id="stat-nodes">0</strong></span>
+      <span>Edges: <strong id="stat-edges">0</strong></span>
+      <span title="Verified Relationship Credentials">VRC: <strong id="stat-vrc">0</strong></span>
+      <span title="Verified Membership Credentials">VMC: <strong id="stat-vmc">0</strong></span>
+      <span>Delegations: <strong id="stat-del">0</strong></span>
+      <span title="Layer-2 peer connections">Peers: <strong id="stat-peer">0</strong></span>
+    </div>
+    <input type="text" id="search-input" placeholder="Search identity name or UUID…" oninput="searchGraph(this.value)">
+    <div>
+      <h3>Node Types</h3>
+      <div class="filter-group">
+        <label><input type="checkbox" checked onchange="applyFilters()" data-node-role="vta"> VTA (agents)</label>
+        <label><input type="checkbox" checked onchange="applyFilters()" data-node-role="vtc"> VTC (communities)</label>
+        <label><input type="checkbox" checked onchange="applyFilters()" data-node-role="vtn"> VTN (networks)</label>
+      </div>
+    </div>
+    <div>
+      <h3>Edge Types</h3>
+      <div class="filter-group">
+        <label><input type="checkbox" checked onchange="applyFilters()" data-edge-kind="credential"> Credentials</label>
+        <label><input type="checkbox" checked onchange="applyFilters()" data-edge-kind="delegation"> Delegations</label>
+        <label><input type="checkbox" checked onchange="applyFilters()" data-edge-kind="peer"> Peer Connections</label>
+      </div>
+    </div>
+    <div>
+      <button class="btn btn-primary" onclick="reloadGraph()">🔄 Reload</button>
+      <button class="btn" onclick="fitGraph()">🔍 Fit</button>
+    </div>
+    <div id="info-card"><h3 style="margin-bottom:6px;">Details</h3><div id="info-body"></div></div>
+    <div id="legend">
+      <h3>Legend</h3>
+      <div><strong>Nodes:</strong></div>
+      <div><span class="sw sw-node-vta"></span> VTA (Agent) &nbsp; <span class="sw sw-node-vtc"></span> VTC (Community, pentagon) &nbsp; <span class="sw sw-node-vtn"></span> VTN (Network, hexagon)</div>
+      <div style="margin-top:6px;"><strong>Edges:</strong></div>
+      <div><span class="sw sw-vrc"></span> VRC (Relationship) &nbsp; <span class="sw sw-vmc"></span> VMC (Membership)</div>
+      <div><span class="sw sw-vec"></span> VEC (Endorsement) &nbsp; <span class="sw sw-other"></span> Custom / Other</div>
+      <div><span class="sw sw-delegation"></span> Delegation (operates/owns/represents/employs)</div>
+      <div><span class="sw" style="background:#6e7681;"></span> Peer Connection (Layer-2 libp2p link)</div>
+      <div style="margin-top:4px;"><span class="sw-solid"></span> Active &nbsp; — &nbsp; Dashed = Revoked/Expired</div>
+    </div>
+  </div>
+</div>
+
+<script>
+var cy;
+
+function showError(msg) {
+  var el = document.getElementById('error');
+  el.style.display = 'block';
+  el.textContent = msg;
+}
+function clearError() { document.getElementById('error').style.display = 'none'; }
+
+function getNodeColor(role) {
+  switch (role) {
+    case 'vta': return '#3b82f6';
+    case 'vtc': return '#10b981';
+    case 'vtn': return '#f59e0b';
+    default: return '#6e7681';
+  }
+}
+
+function getNodeSize(role) {
+  switch (role) {
+    case 'vtn': return 55;
+    case 'vtc': return 40;
+    case 'vta': return 30;
+    default: return 28;
+  }
+}
+
+function getNodeShape(role) {
+  switch (role) {
+    case 'vtn': return 'hexagon';
+    case 'vtc': return 'pentagon';
+    case 'vta': return 'ellipse';
+    default: return 'ellipse';
+  }
+}
+
+function getEdgeColor(vcType, kind) {
+  if (kind === 'delegation') return '#f85149';
+  if (kind === 'peer') return '#6e7681';
+  switch (vcType) {
+    case 'vrc': return '#3fb950';
+    case 'vmc': return '#58a6ff';
+    case 'vec': return '#bc8cff';
+    case 'custom_endorsement': return '#d2991d';
+    default: return '#d2991d';
+  }
+}
+
+function buildGraph(data) {
+  var elements = [];
+
+  for (var i = 0; i < data.nodes.length; i++) {
+    var n = data.nodes[i];
+    var color = getNodeColor(n.role);
+    var size = getNodeSize(n.role);
+    var shape = getNodeShape(n.role);
+    elements.push({
+      group: 'nodes',
+      data: {
+        id: n.id,
+        label: n.label,
+        role: n.role,
+        subjectKind: n.subjectKind,
+        identityUuid: n.identityUuid,
+        did: n.did || '',
+        members: n.members || [],
+        bgColor: color,
+        borderColor: color,
+        nodeShape: shape,
+        nw: size,
+        nh: size
+      }
+    });
+  }
+
+  for (var j = 0; j < data.edges.length; j++) {
+    var e = data.edges[j];
+    var vcType = e.vcType || '';
+    var isRevoked = e.status === 'revoked' || e.status === 'expired';
+    var lineStyle = e.kind === 'peer' ? (isRevoked ? 'dashed' : 'dotted') : (isRevoked ? 'dashed' : 'solid');
+    var color = getEdgeColor(vcType, e.kind);
+    var label = e.label || vcType || e.relationshipType || e.kind;
+    elements.push({
+      group: 'edges',
+      data: {
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        kind: e.kind,
+        label: label,
+        vcType: vcType,
+        status: e.status || 'active',
+        relationshipType: e.relationshipType || '',
+        claim: e.claim || '', validFrom: e.validFrom || 0,
+        validUntil: e.validUntil || 0, thresholdRequired: e.thresholdRequired,
+        lineColor: color,
+        lineStyle: lineStyle,
+        targetArrowColor: color,
+        targetArrowShape: e.kind === 'peer' ? 'none' : 'triangle',
+        ew: e.kind === 'delegation' ? 1.8 : (e.kind === 'peer' ? 1.5 : 2),
+        curveStyle: 'bezier'
+      }
+    });
+  }
+
+  return elements;
+}
+
+function initCytoscape(data) {
+  var elements = buildGraph(data);
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: elements,
+    style: [
+      {
+        selector: 'node',
+        style: {
+          'background-color': 'data(bgColor)',
+          'border-color': 'data(borderColor)',
+          'border-width': 1.5,
+          'shape': 'data(nodeShape)',
+          'width': 'data(nw)',
+          'height': 'data(nh)',
+          'label': 'data(label)',
+          'font-size': '10px',
+          'color': '#c9d1d9',
+          'text-valign': 'bottom',
+          'text-halign': 'center',
+          'text-margin-y': 6,
+          'text-background-color': '#0d1117',
+          'text-background-opacity': 0.8,
+          'text-background-padding': '2px'
+        }
+      },
+      {
+        selector: 'edge',
+        style: {
+          'line-color': 'data(lineColor)',
+          'line-style': 'data(lineStyle)',
+          'target-arrow-color': 'data(targetArrowColor)',
+          'target-arrow-shape': 'data(targetArrowShape)',
+          'width': 'data(ew)',
+          'curve-style': 'data(curveStyle)',
+          'label': 'data(label)',
+          'font-size': '8px',
+          'color': 'data(lineColor)',
+          'text-background-color': '#0d1117',
+          'text-background-opacity': 0.9,
+          'text-background-padding': '2px'
+        }
+      },
+      {
+        selector: ':selected',
+        style: { 'border-color': '#ffffff', 'border-width': 3 }
+      }
+    ],
+    layout: { name: 'cose', animate: true, animationDuration: 1000, padding: 50, nodeRepulsion: 12000, idealEdgeLength: 150, edgeElasticity: 0.25, gravity: 0.15, numIter: 2000 }
+  });
+
+  cy.on('tap', 'node', function(evt) {
+    var node = evt.target;
+    var d = node.data();
+    var card = document.getElementById('info-card');
+    var body = document.getElementById('info-body');
+    card.style.display = 'block';
+    var html =
+      '<div><span class="key">Name:</span> <span class="val">' + escapeHtml(d.label) + '</span></div>' +
+      '<div><span class="key">Role:</span> <span class="val">' + escapeHtml(d.role || '?') + '</span></div>' +
+      '<div><span class="key">Subject Kind:</span> <span class="val">' + escapeHtml(d.subjectKind || '?') + '</span></div>' +
+      '<div><span class="key">DID:</span> <span class="val" title="' + escapeHtml(String(d.did || '')) + '">' + escapeHtml(shortDid(d.did)) + '</span></div>';
+    if (d.members && d.members.length > 0) {
+      html += '<div style="margin-top:6px;"><span class="key">Members:</span></div>';
+      for (var i = 0; i < d.members.length; i++) {
+        var m = d.members[i];
+        html += '<div style="padding-left:10px;"><span class="val">• ' + escapeHtml(m.label || ('#' + String(m.uuid || '').slice(0, 8))) +
+          (m.role ? ' <span class="key">(' + escapeHtml(m.role) + ')</span>' : '') + '</span></div>';
+      }
+    }
+    html +=
+      '<button class="btn btn-sm" style="margin-top:6px;" onclick="focusIdentity(\'' + d.identityUuid + '\')">🔍 Focus this identity</button>' +
+      '<button class="btn btn-sm" style="margin-top:6px;" onclick="expandIdentity(\'' + d.identityUuid + '\')">🌐 Show 1-hop neighbors</button>';
+    body.innerHTML = html;
+  });
+
+  cy.on('tap', 'edge', function(evt) {
+    var edge = evt.target;
+    var d = edge.data();
+    var card = document.getElementById('info-card');
+    var body = document.getElementById('info-body');
+    card.style.display = 'block';
+    var html = '<div><span class="key">Type:</span> <span class="val">' + escapeHtml(d.kind || '') + '</span></div>';
+    if (d.vcType) html += '<div><span class="key">Credential Type:</span> <span class="val">' + escapeHtml(d.vcType) + '</span></div>';
+    if (d.relationshipType) html += '<div><span class="key">Relationship:</span> <span class="val">' + escapeHtml(d.relationshipType) + '</span></div>';
+    if (d.status) html += '<div><span class="key">Status:</span> <span class="val">' + escapeHtml(d.status) + '</span></div>';
+    if (d.claim) html += '<div style="margin-top:6px;"><span class="key">Claim:</span></div><pre>' + escapeHtml(formatClaim(d.claim)) + '</pre>';
+    if (d.validFrom) html += '<div><span class="key">Valid From:</span> <span class="val">' + formatEpoch(d.validFrom) + '</span></div>';
+    if (d.validUntil) html += '<div><span class="key">Valid Until:</span> <span class="val">' + formatEpoch(d.validUntil) + '</span></div>';
+    if (d.thresholdRequired !== undefined && d.thresholdRequired !== null && d.thresholdRequired !== '') {
+      html += '<div><span class="key">Threshold:</span> <span class="val">' + escapeHtml(String(d.thresholdRequired)) + '</span></div>';
+    }
+    body.innerHTML = html;
+  });
+
+  cy.on('tap', function(evt) {
+    if (evt.target === cy) {
+      document.getElementById('info-card').style.display = 'none';
+    }
+  });
+
+  updateStats(data);
+}
+
+function applyFilters() {
+  if (!cy) return;
+  var nodeChecks = document.querySelectorAll('input[data-node-role]');
+  var edgeChecks = document.querySelectorAll('input[data-edge-kind]');
+
+  var visibleRoles = {};
+  nodeChecks.forEach(function(cb) { visibleRoles[cb.getAttribute('data-node-role')] = cb.checked; });
+
+  var visibleKinds = {};
+  edgeChecks.forEach(function(cb) { visibleKinds[cb.getAttribute('data-edge-kind')] = cb.checked; });
+
+  cy.batch(function() {
+    cy.edges().forEach(function(edge) {
+      var kind = edge.data('kind');
+      edge.style('display', visibleKinds[kind] ? 'element' : 'none');
+    });
+    cy.nodes().forEach(function(node) {
+      var role = node.data('role');
+      if (!visibleRoles[role]) {
+        node.style('display', 'none');
+        return;
+      }
+      var connectedEdges = node.connectedEdges();
+      // Keep standalone nodes (no edges at all) visible; only hide nodes
+      // whose edges are all hidden by filters.
+      var hasVisible = connectedEdges.length === 0 || connectedEdges.some(function(e) { return e.style('display') !== 'none'; });
+      node.style('display', hasVisible ? 'element' : 'none');
+    });
+  });
+}
+
+function searchGraph(query) {
+  if (!cy) return;
+  var q = query.trim().toLowerCase();
+  if (!q) { cy.nodes().style('display', 'element'); applyFilters(); return; }
+  cy.nodes().forEach(function(n) {
+    var label = (n.data('label') || '').toLowerCase();
+    var uuid = String(n.data('identityUuid') || '').toLowerCase();
+    var did = String(n.data('did') || '').toLowerCase();
+    n.style('display', (label.indexOf(q) >= 0 || uuid.indexOf(q) >= 0 || did.indexOf(q) >= 0) ? 'element' : 'none');
+  });
+}
+
+function focusIdentity(identityUuid) {
+  if (!cy) return;
+  var node = cy.getElementById(identityUuid);
+  if (node && node.length > 0) {
+    cy.fit(node, 80);
+    node.style('border-color', '#ffffff');
+    node.style('border-width', 3);
+    setTimeout(function() {
+      node.style('border-color', getNodeColor(node.data('role')));
+      node.style('border-width', 1.5);
+    }, 2000);
+  }
+}
+
+function expandIdentity(identityUuid) {
+  if (!cy) return;
+  var node = cy.getElementById(identityUuid);
+  if (node && node.length > 0) {
+    var neighborhood = node.closedNeighborhood();
+    cy.fit(neighborhood, 60);
+  }
+}
+
+function fitGraph() { if (cy) { cy.fit(); cy.center(); } }
+
+function updateStats(data) {
+  document.getElementById('stat-nodes').textContent = data.nodes.length;
+  document.getElementById('stat-edges').textContent = data.edges.length;
+  document.getElementById('stat-vrc').textContent = data.edges.filter(function(e) { return e.vcType === 'vrc'; }).length;
+  document.getElementById('stat-vmc').textContent = data.edges.filter(function(e) { return e.vcType === 'vmc'; }).length;
+  document.getElementById('stat-del').textContent = data.edges.filter(function(e) { return e.kind === 'delegation'; }).length;
+  document.getElementById('stat-peer').textContent = data.edges.filter(function(e) { return e.kind === 'peer'; }).length;
+}
+
+async function reloadGraph() {
+  clearError();
+  try {
+    var res = await fetch('/graph/edges?format=graph');
+    if (!res.ok) throw new Error('GET /graph/edges?format=graph failed: ' + res.status);
+    var data = await res.json();
+    if (cy) cy.destroy();
+    initCytoscape(data);
+    // Show info banner when there are nodes but no trust edges
+    var banner = document.getElementById('info-banner');
+    banner.style.display = (data.nodes.length > 0 && data.edges.length === 0) ? 'block' : 'none';
+    applyFilters();
+  } catch (err) {
+    showError('Failed to load trust graph: ' + err.message);
+  }
+}
+
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
+
+// Compact a DID for display. A did:peer:4 DID embeds the entire encoded DID
+// document in its method-specific id, so the raw value runs to thousands of
+// characters (e.g. did:peer:4zQm…:zsHK4…). The trust graph shows the method's
+// short form instead — everything up to the first colon that follows the
+// "did:peer:4" prefix (did:peer:4zQm…), matching the tidy did:scid:vh a VTA
+// node already shows. DIDs of any other method (and a did:peer:4 with no such
+// colon) are returned unchanged.
+function shortDid(did) {
+  var s = String(did || '');
+  var prefix = 'did:peer:4';
+  if (s.indexOf(prefix) === 0) {
+    var colon = s.indexOf(':', prefix.length);
+    if (colon > 0) return s.slice(0, colon);
+  }
+  return s;
+}
+
+// Pretty-print a credential claim for the info card (it is stored as a JSON
+// string in the credentials table). Falls back to the raw string on parse
+// errors.
+function formatClaim(claim) {
+  if (!claim) return '';
+  try {
+    var parsed = JSON.parse(claim);
+    return JSON.stringify(parsed, null, 2);
+  } catch (e) {
+    return claim;
+  }
+}
+
+// Format an epoch-seconds timestamp as a human-readable local string.
+function formatEpoch(epoch) {
+  var n = Number(epoch);
+  if (!n) return '';
+  var d = new Date(n * 1000);
+  return isNaN(d.getTime()) ? String(epoch) : d.toLocaleString();
+}
+
+reloadGraph();
+window.addEventListener('resize', function() { if (cy) cy.resize(); });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Event Archive — P2PTS Utility Server</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+  <div class="page-header">
+    <div class="container">
+      <span class="badge" style="background:#1e3a5f;color:#93c5fd;">utility-server</span>
+      <h1>📋 Event Archive</h1>
+      <p>Append-only trust event log: rotation entries, witness attestations, membership changes,
+        credential events, and personhood assertions. Filterable by identity, VTC, and time range.</p>
+    </div>
+  </div>
+
+  <div class="container section">
+    <p><a href="index.html">&larr; Back to dashboard</a></p>
+
+    <div id="error" class="error-banner" style="display:none;"></div>
+
+    <div class="card">
+      <h3>Filters</h3>
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <select id="filter-type" style="flex:1;min-width:150px;">
+          <option value="">All Event Types</option>
+          <option value="credential">Credentials</option>
+          <option value="membership">Memberships</option>
+          <option value="delegation">Delegations</option>
+          <option value="personhood">Personhood Events</option>
+        </select>
+        <input type="text" id="filter-identity" placeholder="Identity ID (optional)" style="flex:1;min-width:150px;">
+        <button class="btn btn-primary" onclick="loadEvents()">Apply Filters</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Event Log</h3>
+      <div id="event-list">
+        <p class="text-muted">Loading…</p>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="container">P2P Trust Stack — utility-server UI</div>
+  </footer>
+
+  <script>
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str ?? '';
+      return div.innerHTML;
+    }
+
+    function timeAgo(ts) {
+      if (!ts) return 'unknown';
+      const d = new Date(ts * 1000);
+      return d.toISOString().replace('T', ' ').substring(0, 19);
+    }
+
+    async function loadEvents() {
+      const el = document.getElementById('event-list');
+      const errorEl = document.getElementById('error');
+      const filterType = document.getElementById('filter-type').value;
+      const filterIdentity = document.getElementById('filter-identity').value.trim();
+
+      el.innerHTML = '<p class="text-muted">Loading…</p>';
+      errorEl.style.display = 'none';
+
+      try {
+        const events = [];
+
+        // Fetch credentials
+        if (!filterType || filterType === 'credential') {
+          try {
+            const credRes = await fetch('/credentials');
+            if (credRes.ok) {
+              const creds = await credRes.json();
+              for (const c of creds) {
+                if (filterIdentity && c.issuerIdentityId != filterIdentity && c.subjectIdentityId != filterIdentity) continue;
+                events.push({
+                  type: 'credential',
+                  label: `${c.vcType.toUpperCase()} ${c.status}`,
+                  detail: `Issuer #${c.issuerIdentityId} → Subject #${c.subjectIdentityId}`,
+                  time: c.validFrom || c.createdAt,
+                  id: c.id,
+                });
+              }
+            }
+          } catch { /* skip */ }
+        }
+
+        // Fetch memberships
+        if (!filterType || filterType === 'membership') {
+          try {
+            const memRes = await fetch('/memberships');
+            if (memRes.ok) {
+              const memberships = await memRes.json();
+              for (const m of memberships) {
+                if (filterIdentity && m.memberIdentityId != filterIdentity && m.communityIdentityId != filterIdentity) continue;
+                events.push({
+                  type: 'membership',
+                  label: `Membership ${m.status}`,
+                  detail: `Member #${m.memberIdentityId} in Community #${m.communityIdentityId} (${m.role || 'member'})`,
+                  time: m.createdAt,
+                  id: m.id,
+                });
+              }
+            }
+          } catch { /* skip */ }
+        }
+
+        // Fetch delegations
+        if (!filterType || filterType === 'delegation') {
+          try {
+            const delRes = await fetch('/delegations');
+            if (delRes.ok) {
+              const delegations = await delRes.json();
+              for (const d of delegations) {
+                if (filterIdentity && d.principalIdentityId != filterIdentity && d.dependentIdentityId != filterIdentity) continue;
+                events.push({
+                  type: 'delegation',
+                  label: `Delegation ${d.relationshipType}${d.revokedAt ? ' (revoked)' : ''}`,
+                  detail: `Principal #${d.principalIdentityId} → Dependent #${d.dependentIdentityId}`,
+                  time: d.createdAt,
+                  id: d.id,
+                });
+              }
+            }
+          } catch { /* skip */ }
+        }
+
+        // Sort by time descending
+        events.sort((a, b) => (b.time || 0) - (a.time || 0));
+
+        if (events.length === 0) {
+          el.innerHTML = '<p class="text-muted">No events found matching the current filters.</p>';
+          return;
+        }
+
+        const typeBadge = {
+          credential: '📜',
+          membership: '🏛️',
+          delegation: '🔗',
+          personhood: '👤',
+        };
+
+        el.innerHTML = events.slice(0, 200).map(e => `
+          <div class="entity-row">
+            <span>${typeBadge[e.type] || '📋'}</span>
+            <div>
+              <div class="name">${escapeHtml(e.label)}</div>
+              <div class="meta">${escapeHtml(e.detail)}</div>
+            </div>
+            <span class="spacer"></span>
+            <span class="meta">${timeAgo(e.time)}</span>
+          </div>
+        `).join('');
+
+        if (events.length > 200) {
+          el.innerHTML += `<p class="text-muted mt-md">Showing 200 of ${events.length} events. Narrow your filters to see more.</p>`;
+        }
+      } catch (err) {
+        errorEl.style.display = 'block';
+        errorEl.textContent = `Failed to load events: ${err.message}`;
+        el.innerHTML = '<p class="text-muted">Failed to load.</p>';
+      }
+    }
+
+    loadEvents();
+  </script>
+
+</body>
+
+</html>

@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Utility Server Setup</title>
+<style>
+  body { font-family: system-ui, sans-serif; background:#0b0f17; color:#e2e8f0; margin:0; padding:2rem; }
+  .wrap { max-width:640px; margin:0 auto; }
+  .card { background:#121826; border:1px solid #1e2535; border-radius:10px; padding:1.5rem; margin-bottom:1rem; }
+  h1, h2 { color:#60a5fa; }
+  label { display:block; margin:0.75rem 0 0.25rem; font-size:0.85rem; color:#94a3b8; }
+  input, select { width:100%; padding:0.5rem; background:#0a0e17; border:1px solid #1e2535; border-radius:6px; color:#e2e8f0; box-sizing:border-box; }
+  button { margin-top:1rem; padding:0.6rem 1rem; background:#2563eb; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+  .seg { display:flex; gap:.5rem; margin-top:.5rem; flex-wrap:wrap; }
+  .seg button { flex:1; margin-top:0; min-width:150px; }
+  .seg button.active { background:#1e3a5f; color:#e0e6ed; border:1px solid #2563eb; outline:2px solid #2563eb; }
+  .error { color:#f87171; background:#7f1d1d; padding:0.5rem 0.75rem; border-radius:6px; display:none; margin-bottom:1rem; }
+  .note { color:#64748b; font-size:0.85rem; }
+  .mono { font-family:monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Utility Server Setup</h1>
+  <p class="note">First launch — configure where this server lives, who administers it, and the namespace it serves.</p>
+  <div id="error" class="error"></div>
+
+  <div class="card" id="step-network">
+    <h2>1 · Network address</h2>
+    <label>Advertised IP / hostname (the peer address this server is reachable at)</label>
+    <input id="advertisedHost" value="127.0.0.1" placeholder="e.g. 203.0.113.5 or host.example.com">
+    <label>HTTP API port</label>
+    <input id="httpPort" type="number" value="8787">
+    <label>libp2p / TSP port</label>
+    <input id="libp2pPort" type="number" value="4003">
+    <label>Bootstrap Server Address</label>
+    <input id="bootstrapServerAddr" placeholder="set via `npm run init:bootstrap` (.env)">
+    <p class="note">The bootstrap/relay address and peer ID live in the component's .env — not hardcoded here.</p>
+    <button onclick="saveNetwork()">Continue</button>
+  </div>
+
+  <div class="card" id="step-identity" style="display:none;">
+    <h2>2 · Founder VTA</h2>
+    <p class="note">The founder VTA becomes the founding admin of the VTN and can edit configuration later.</p>
+    <div class="seg">
+      <button id="seg-login" onclick="switchMode('login')">Use local VTA</button>
+      <button id="seg-locate" onclick="switchMode('locate')">Find on network</button>
+      <button id="seg-create" onclick="createFounderVta()">Create founder VTA</button>
+    </div>
+    <div id="loginPanel">
+      <label>Your VTA</label>
+      <select id="vtaDid"></select>
+      <label>Passphrase (to unlock this VTA)</label>
+      <input id="loginPassphrase" type="password">
+      <button onclick="saveIdentity()">Use this VTA</button>
+    </div>
+    <div id="locatePanel" style="display:none;">
+      <p class="note">Discover agent VTAs on the network via the bootstrap server, then match by DID.</p>
+      <button onclick="discoverPeers()">Refresh network peers</button>
+      <label>Located agent VTA (by DID)</label>
+      <select id="locateDid"></select>
+      <label>Or enter a DID directly</label>
+      <input id="locateDidInput" placeholder="did:scid:vh:...">
+      <label>Passphrase (to unlock this VTA)</label>
+      <input id="locatePassphrase" type="password">
+      <button onclick="saveIdentity()">Use this VTA</button>
+    </div>
+    <div id="createPanel" style="display:none;">
+      <label>Display name</label>
+      <input id="name">
+      <label>Passphrase (min 8 characters)</label>
+      <input id="passphrase" type="password">
+    </div>
+    <div id="seedResult" style="display:none; margin-top:1rem; padding:1rem; background:#0a0e17; border:1px solid #34d399; border-radius:8px;">
+      <h3 style="margin:0 0 8px 0; color:#34d399;">✓ Founder VTA created — save your seed phrase</h3>
+      <p class="note" style="margin:0 0 8px 0;">This 24-word seed phrase is the ONLY way to claim this VTA in your agent app. Store it securely now — it will not be shown again.</p>
+      <div id="seedPhrase" class="mono" style="padding:10px; background:#121826; border:1px solid #1e2535; border-radius:6px; word-break:break-all; font-size:14px; line-height:1.6;"></div>
+      <div style="display:flex; gap:.5rem; margin-top:.5rem;">
+        <button onclick="copySeed()">Copy</button>
+        <button onclick="continueToVtn()" style="background:#34d399; color:#0b0f17;">I've saved it — Continue →</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="step-vtn" style="display:none;">
+    <h2>3 · Network (VTN) + Namespace</h2>
+    <label>VTN Name: The long name for your network</label>
+    <input id="vtnName" placeholder="e.g. My Network">
+    <label>VTN Namespace: The short identifier used to resolve agent names in your network<br>(for example, agent names are addressed as <span class="mono">vta:&lt;namespace&gt;:&lt;agent name&gt;</span>)</label>
+    <input id="namespace" placeholder="e.g. p2pts">
+    <button onclick="saveVtn()">Create VTN</button>
+    <p class="note">Joining an existing VTN is a stub for now.</p>
+  </div>
+
+  <div class="card" id="step-confirm" style="display:none;">
+    <h2>4 · Confirm</h2>
+    <div id="summary" class="note"></div>
+    <button onclick="confirmSetup()">Confirm &amp; Finish</button>
+  </div>
+
+  <div class="card" id="step-done" style="display:none;">
+    <h2>✅ Setup complete</h2>
+    <p id="done-msg" class="note"></p>
+    <p class="note">The setup process has stopped. You can close this tab — start the utility server again to enter operational mode.</p>
+  </div>
+</div>
+<script>
+let mode = 'login';
+function err(msg) { const e = document.getElementById('error'); e.textContent = msg || ''; e.style.display = msg ? 'block' : 'none'; }
+function show(id) { ['network','identity','vtn','confirm','done'].forEach(function(s){ document.getElementById('step-' + s).style.display = (s === id) ? 'block' : 'none'; }); }
+function switchMode(m) {
+  mode = m;
+  ['login','locate','create'].forEach(function(s) {
+    document.getElementById('seg-' + s).classList.toggle('active', s === m);
+  });
+  document.getElementById('loginPanel').style.display = (m === 'login') ? 'block' : 'none';
+  document.getElementById('locatePanel').style.display = (m === 'locate') ? 'block' : 'none';
+  document.getElementById('createPanel').style.display = (m === 'create') ? 'block' : 'none';
+  document.getElementById('seedResult').style.display = 'none';
+  if (m === 'locate') { discoverPeers(); }
+}
+
+async function discoverPeers() {
+  const sel = document.getElementById('locateDid');
+  sel.innerHTML = '<option value="">Discovering…</option>';
+  try {
+    const r = await fetch('/setup/discover');
+    const d = await r.json();
+    sel.innerHTML = '';
+    if (!d.available) {
+      sel.innerHTML = '<option value="">' + (d.message || 'Bootstrap server unavailable') + '</option>';
+      return;
+    }
+    (d.peers || []).forEach(function (p) {
+      const o = document.createElement('option');
+      o.value = p.did || '';
+      o.textContent = (p.did || p.peerId) + (p.vid ? ' (' + p.vid.slice(0, 10) + '…)' : '');
+      sel.appendChild(o);
+    });
+    if (!(d.peers || []).length) sel.innerHTML = '<option value="">No agent VTAs discovered</option>';
+  } catch (e) {
+    sel.innerHTML = '<option value="">' + e.message + '</option>';
+  }
+}
+
+async function loadCandidates() {
+  const r = await fetch('/setup/candidates');
+  const d = await r.json();
+  const sel = document.getElementById('vtaDid');
+  sel.innerHTML = '';
+  (d.vtas || []).forEach(function (c) {
+    const o = document.createElement('option');
+    o.value = c.did;
+    o.textContent = (c.name || c.did) + (c.subjectKind ? ' (' + c.subjectKind + ')' : '');
+    sel.appendChild(o);
+  });
+  return (d.vtas || []).length;
+}
+
+async function enterIdentityStep() {
+  let count = 0;
+  try { count = await loadCandidates(); } catch (e) { err(e.message); }
+  if (count > 0) {
+    err('');
+    switchMode('login');
+  } else {
+    switchMode('create');
+    err('No existing VTA found in the agent database. Use Create founder VTA to make one.');
+  }
+}
+
+async function saveNetwork() {
+  const body = {
+    advertisedHost: document.getElementById('advertisedHost').value.trim(),
+    httpPort: parseInt(document.getElementById('httpPort').value, 10),
+    libp2pPort: parseInt(document.getElementById('libp2pPort').value, 10),
+  };
+  const r = await fetch('/setup/network', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) { err(d.error); return; }
+  err('');
+  show('identity');
+  enterIdentityStep();
+}
+
+// The row's third button ("Create founder VTA") is BOTH the way into the create form and
+// its submit action — the panel's own submit button was removed so there is exactly one
+// control for this step. First press: reveal Name + Passphrase and focus the name. Press
+// again with the fields filled: create. `saveIdentity()` still performs the work for every
+// mode (login / locate / create); only the create step's entry point moved up into the row.
+function createFounderVta() {
+  var panel = document.getElementById('createPanel');
+  if (mode !== 'create' || panel.style.display === 'none') {
+    switchMode('create');
+    document.getElementById('name').focus();
+    return;
+  }
+  saveIdentity();
+}
+
+async function saveIdentity() {
+  var body;
+  if (mode === 'create') {
+    body = { action: 'create', name: document.getElementById('name').value.trim(), passphrase: document.getElementById('passphrase').value };
+  } else if (mode === 'locate') {
+    var did = document.getElementById('locateDidInput').value.trim() || document.getElementById('locateDid').value;
+    body = { action: 'login', did: did, passphrase: document.getElementById('locatePassphrase').value };
+  } else {
+    body = { action: 'login', did: document.getElementById('vtaDid').value, passphrase: document.getElementById('loginPassphrase').value };
+  }
+  const r = await fetch('/setup/identity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) { err(d.error); return; }
+  err('');
+  if (mode === 'create' && d.founder && d.founder.mnemonic) {
+    // Show the seed phrase prominently and require acknowledgment before continuing.
+    document.getElementById('seedPhrase').textContent = d.founder.mnemonic;
+    document.getElementById('seedResult').style.display = 'block';
+    ['loginPanel','locatePanel','createPanel'].forEach(function(p) {
+      document.getElementById(p).style.display = 'none';
+    });
+    return;
+  }
+  if (d.note) { document.getElementById('summary').textContent = d.note; }
+  show('vtn');
+}
+
+function continueToVtn() {
+  show('vtn');
+}
+
+function copySeed() {
+  var t = document.getElementById('seedPhrase').textContent;
+  var btn = document.querySelector('#seedResult button');
+  var orig = btn ? btn.textContent : 'Copy';
+  var done = function() {
+    if (btn) { btn.textContent = 'Copied!'; setTimeout(function() { btn.textContent = orig; }, 1200); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(done, done);
+  } else {
+    var range = document.createRange();
+    range.selectNodeContents(document.getElementById('seedPhrase'));
+    var sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(range);
+    done();
+  }
+}
+
+async function saveVtn() {
+  const body = {
+    action: 'create',
+    name: document.getElementById('vtnName').value.trim() || 'Default Network',
+    namespace: document.getElementById('namespace').value.trim() || 'default',
+  };
+  const r = await fetch('/setup/vtn', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) { err(d.error); return; }
+  err('');
+  // The namespace as entered (`p2pts`); `vta:<namespace>:<name>` is the AGENT-NAME form and
+  // the wizard's own field label already teaches it.
+  document.getElementById('summary').textContent = 'VTN: ' + d.vtn.name + ' · Namespace: ' + d.vtn.namespace;
+  show('confirm');
+}
+
+async function confirmSetup() {
+  const r = await fetch('/setup/confirm', { method: 'POST' });
+  const d = await r.json();
+  if (!r.ok) { err(d.error); return; }
+  err('');
+  document.getElementById('done-msg').textContent = d.message;
+  show('done');
+}
+</script>
+</body>
+</html>
