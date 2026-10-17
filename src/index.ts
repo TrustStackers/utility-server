@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * Entry point: boots the YugabyteDB DataSource (running migrations), the
  * libp2p node, this server's own VTA identity, the TSP inbound-message

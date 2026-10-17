@@ -274,3 +274,25 @@ src/services/                Composed business logic (7 modules, all async)
   TSP, keystore, repositories) via relative paths, using the same
   `--experimental-strip-types` execution style as the rest of the repo — no build
   step required for dev.
+
+## License
+
+**Dual-licensed:**
+
+- **AGPL-3.0-only** — see [`LICENSE`](./LICENSE); or
+- a **commercial license** where AGPL-3.0 obligations (copyleft, source
+  disclosure, and the section 13 network-interaction requirement) are not
+  acceptable — see [`COMMERCIAL-LICENSE.md`](./COMMERCIAL-LICENSE.md).
+
+[`NOTICE`](./NOTICE) declares the `LicenseRef-TrustStackers-Commercial`
+reference and lists third-party attribution.
+
+**Operating a utility server for the public network is free under the AGPL
+branch.** Because this is the component most likely to be offered as a hosted
+service, note that section 13 applies: if you modify the software and let users
+interact with it over a network, you must offer them the Corresponding Source of
+your modified version. A link to the tagged commit you deploy is sufficient.
+
+[`TRADEMARK.md`](./TRADEMARK.md) covers the marks ("Trust Stackers", "P2P Trust
+Stack"), which no license grants. All contributions require the
+[CLA](./CLA.md) — see [CONTRIBUTING.md](./CONTRIBUTING.md).

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * Public DID resolution routes — the entire route table of the resolver
  * listener built by `utility-server/src/resolver-app.ts`.

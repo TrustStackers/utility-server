@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * Exchange runtime holder — the single server-side ExchangeEngine instance,
  * set once at startup (index.ts) and imported by route handlers that trigger

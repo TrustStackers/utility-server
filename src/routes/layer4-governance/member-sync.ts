@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 import type { DataSource } from '@p2p-trust-stack/core/db/data-source.js';
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 

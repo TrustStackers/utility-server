@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * Phase B — GovernanceChangeParticipant: begin → signed approvals → crystallize, with
  * the approved change actually APPLIED. Consent is real Ed25519 over the proposal hash,

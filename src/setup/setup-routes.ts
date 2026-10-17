@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * setup-routes — API endpoints for the first-launch configuration wizard.
  * Mirrors the crowdfund app's setup-routes, but the VTN it creates is a REAL

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * AgentDeliveryQueue — general-purpose delivery queue for utility-server-to-agent
  * data pushes. This is the CRE `ExchangeFanoutStore` implementation: the engine

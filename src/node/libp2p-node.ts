@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * Boots a libp2p node for the utility server with transports matching the
  * agent-app: TCP + WebSockets + circuit-relay-v2 (for NAT traversal and

@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+-- Copyright (C) 2026 Trust Stackers
+
 -- 0016_peer_endpoints.sql  (PostgreSQL/Yugabyte flavor — the server's own migrations dir)
 -- Host/runtime peer binding: one or more libp2p endpoints per identity.
 --

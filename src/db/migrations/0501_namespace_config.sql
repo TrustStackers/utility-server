@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+-- Copyright (C) 2026 Trust Stackers
+
 -- 0018_namespace_config.sql
 -- Namespace ↔ VTN binding (utility-server only — no core src/db counterpart).
 --

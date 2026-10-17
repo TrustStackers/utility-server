@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * P6.4 wiring test — verifies the real executors are registered by the
  * ceremony-participant module and that their CONTEXT contract matches what

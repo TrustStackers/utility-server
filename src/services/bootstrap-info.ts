@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * Bootstrap client holder — exposes the running bootstrap client + libp2p node
  * to the setup wizard so it can discover/locate an agent VTA by DID during the

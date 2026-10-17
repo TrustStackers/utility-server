@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * setup-guard — redirects an unconfigured instance to the setup wizard.
  * Mirrors crowdfund's setup-guard; registered as an onRequest hook only when

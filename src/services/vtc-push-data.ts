@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * VTC push-data assembly — the server-side catalog materializers + payload
  * builders for the queue-row recordsets (vtc-membership, governance, credential).

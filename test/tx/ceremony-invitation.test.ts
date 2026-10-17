@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * The member-INVITATION ceremony (migration 0023): driving `member-invitation` issues a
  * signed VIC — the credential authorizing one named prospective member to onboard — and

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * Layer 5 — Trust Applications: Profile routes (Scenario 3 — "Manage
  * Multiple Profiles"), including the R-Card assembly endpoint that also

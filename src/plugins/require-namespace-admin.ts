@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * require-namespace-admin — Fastify preHandler that gates the founder-admin
  * configuration surface: the session identity must be a VTA holding an ACTIVE

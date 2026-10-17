@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * Server-side TSP request adapter — creates a TspRequestFn for the utility
  * server to initiate transaction-coordinated requests to agents.

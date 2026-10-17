@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * Layer 5 — Trust Applications: VTN affiliation, hierarchy, and
  * effective-policy routes (Scenario 9 — "VTNs & Nested Communities",

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-TrustStackers-Commercial
+// Copyright (C) 2026 Trust Stackers
+
 /**
  * Route-level tests for VTN affiliation (`PATCH /vtcs/:uuid/affiliate`,
  * `POST /vtcs/:uuid/unaffiliate`).
