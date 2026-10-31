@@ -181,7 +181,7 @@ function resolveUuid(canonicalize: Map<string, string>, uuid: string): string {
  * Append the VTN key to a display label: `utility-server` → `utility-server (p2pts)`.
  *
  * The parenthetical value is the VTN **key** (the namespace the operator set
- * during setup, e.g. `p2pts` / `fpndtg`) — the identifier agents match on to
+ * during setup, e.g. `p2pts` / `acme`) — the identifier agents match on to
  * find this server, and the one the bootstrap dashboard already renders as
  * `Utl Server (p2pts)`. It is a label suffix, not a second source of truth.
  *
@@ -315,7 +315,7 @@ async function sendGraphFormat(db: DataSource, reply: FastifyReply) {
     membersByCommunity.set(community, list);
   }
 
-  // ── The served VTN key (`p2pts`, `fpndtg`) ──
+  // ── The served VTN key (e.g. `p2pts`, `acme`) ──
   // Used to name the network on the utility-server/VTN node labels below.
   // Best-effort by design: `namespace_config` is a utility-server-only table
   // (the core SQLite schema this route's tests migrate deliberately omits it),
