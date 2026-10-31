@@ -51,6 +51,11 @@ VTC governance.
 cd utility-server
 npm install
 
+# Write ./.env — the bootstrap/relay this server registers with. Keep the phrase
+# file OUTSIDE the repo; it is the relay's private key. See "Bootstrap
+# configuration" under Config below, including the shared development relay.
+npm run init:bootstrap -- --words-file ~/data/phrase.txt --host relay.truststackers.com
+
 # Start YugabyteDB (runs in background, data persists across restarts)
 docker compose up -d
 
@@ -60,6 +65,9 @@ docker compose ps   # should show "healthy"
 # Start the utility server (auto-runs migrations against YugabyteDB)
 npm start
 ```
+
+Without a `.env` the server still starts, but in LAN-only mode — it will not
+register with the relay, and no agent will find it.
 
 ### Daily development
 
@@ -91,7 +99,7 @@ wizard still works).
 ```sh
 # Write ./.env from the relay's BIP-39 phrase. Keep the phrase file OUTSIDE this
 # repo (e.g. ~/data/phrase.txt) — it is the relay's PRIVATE KEY.
-npm run init:bootstrap -- --words-file ~/data/phrase.txt --host mediator.fpndtg.com
+npm run init:bootstrap -- --words-file ~/data/phrase.txt --host relay.truststackers.com
 ```
 
 The tool lives in `scripts/init-bootstrap-env.ts` and is **self-contained** — it
@@ -112,7 +120,7 @@ bomb miracle trend garment noble chicken range account gravity shoe sense
 ```
 
 It derives peer ID `12D3KooWKF2Tmh21NNSH5gWazfbmFEtTZS9XT1uXk8njFAy5jUda` at host
-`mediator.fpndtg.com`. Because that phrase is public, **anyone can impersonate the
+`relay.truststackers.com`. Because that phrase is public, **anyone can impersonate the
 relay** — treat anything you send through it as observable. Use it only for
 exploration and demos.
 
