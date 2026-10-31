@@ -5,19 +5,27 @@
 
 /**
  * init-bootstrap-env — initialize this utility server's bootstrap/relay
- * identity + address.
+ * **client** configuration.
  *
  * Run from the utility-server repo root: `npm run init:bootstrap`.
  *
  * ## What it does
  *
- * A developer supplies a **24-word BIP-39 word sequence** (or asks the tool to
- * generate one). The tool:
+ * The utility server is a **client** of the bootstrap/relay server: it only has
+ * to know WHERE that server is and WHICH peer ID to expect. So a developer
+ * supplies the relay's **24-word BIP-39 word sequence** (checksum-validated) and
+ * this tool:
  *
- *   1. derives the 32-byte Ed25519 seed from the words (checksum-validated),
- *   2. derives the libp2p **peer ID** from that seed,
- *   3. writes this repo's gitignored **`.env`** with the bootstrap seed, peer ID,
- *      host (DNS name or fixed public IP) and ports.
+ *   1. derives the 32-byte Ed25519 seed from the words,
+ *   2. derives the relay's libp2p **peer ID** from that seed,
+ *   3. writes this repo's gitignored **`.env`** with the peer ID, host (DNS name
+ *      or fixed public IP) and ports — and **never the seed**.
+ *
+ * The phrase is used only to derive a PUBLIC value (the peer ID) and is then
+ * discarded. A seed in a client `.env` is a leaked private key with no client
+ * use, and `loadBootstrapClientEnv` refuses to start if it finds one — so
+ * re-running this tool over an older `.env` STRIPS a stale `BOOTSTRAP_SEED_HEX`
+ * rather than leaving it behind.
  *
  * The `.env` is the single source of truth this server reads through
  * `@p2p-trust-stack/core/config/bootstrap-env.js` — there are no hardcoded
@@ -25,23 +33,25 @@
  *
  * ## Examples
  *
- *   # Generate a fresh word sequence, print it once, write ./.env
- *   npm run init:bootstrap -- --generate --host mediator.example.com
+ *   # Use the relay's phrase kept OUTSIDE this repo (never lands in shell history)
+ *   npm run init:bootstrap -- --words-file ~/data/phrase.txt --host mediator.example.com
  *
- *   # Use an existing phrase kept in a file (never lands in shell history)
- *   npm run init:bootstrap -- --words-file ./phrase.txt --host 203.0.113.5
+ *   # Or pass the phrase inline
+ *   npm run init:bootstrap -- --words "<24 words>" --host 203.0.113.5
+ *
+ * The shared Trust Stackers development relay's phrase is documented in README.md.
+ * That relay is deliberately public and **NOT SECURE** — see the security note there.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { basename, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { keys } from '@libp2p/crypto';
 import { peerIdFromPrivateKey } from '@libp2p/peer-id';
 
-import { mnemonicToSeed, exportSeedPhrase } from '@p2p-trust-stack/core/crypto/seed-phrase.js';
-import { buildBootstrapUrls, type BootstrapEnv } from '@p2p-trust-stack/core/config/bootstrap-env.js';
+import { mnemonicToSeed } from '@p2p-trust-stack/core/crypto/seed-phrase.js';
+import { buildBootstrapUrls } from '@p2p-trust-stack/core/config/bootstrap-env.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 /** This repo's root — the script lives in `<root>/scripts/`. */
@@ -98,21 +108,26 @@ function parseArgs(argv: string[]): Args {
 
 function printHelp(): void {
   console.log(`
-init-bootstrap-env — set this utility server's bootstrap/relay identity + address.
+init-bootstrap-env — set this utility server's bootstrap/relay CLIENT config.
 
 Usage:
   npm run init:bootstrap -- [options]
 
-Identity (pick ONE):
-  --generate                Generate a fresh 24-word sequence (printed once).
-  --words "<24 words>"      Use this BIP-39 word sequence.
-  --words-file <path>       Read the word sequence from a file (avoids shell history).
+Identity — the RELAY's phrase (pick ONE):
+  --words "<24 words>"      The relay's BIP-39 word sequence.
+  --words-file <path>       Read it from a file (avoids shell history). Keep the
+                            file OUTSIDE this repo, e.g. ~/data/phrase.txt.
+
+  The phrase is used ONLY to derive the relay's public peer ID. It is never
+  written to ./.env, and a stale BOOTSTRAP_SEED_HEX in an existing .env is
+  REMOVED. Only a bootstrap server needs the seed itself: this component is a
+  client, and a client that carries a seed is refused at startup.
 
 Address:
   --host <dns-or-ip>        DNS name OR fixed public IP (required).
   --tcp-port <n>            TCP port (default 4001).
   --ws-port <n>             WebSocket port (default 4002).
-  --no-relay                Disable the circuit-relay service on the server.
+  --no-relay                Mark the relay as unavailable.
 
 Output:
   --out <path>              Write to this file (default ./.env).
@@ -124,6 +139,9 @@ Writes this repo's gitignored ./.env, read back through
 
 (--component utility-server and --all are still accepted for backwards
 compatibility; this repo has a single component.)
+
+--generate is NOT available here. Minting a new relay identity belongs to the
+bootstrap server — in the 'bootstrap' repo, npm run init-bootstrap -- --generate.
 `);
 }
 
@@ -152,6 +170,62 @@ function upsertEnvKeys(existing: string, updates: Record<string, string>): strin
     for (const [k, v] of remaining) outLines.push(`${k}=${v}`);
   }
   return outLines.join('\n').replace(/\n*$/, '\n');
+}
+
+/**
+ * Drop `KEY=value` lines (and any comment line immediately above them that
+ * mentions the key) from existing `.env` text.
+ *
+ * Used to strip a stale `BOOTSTRAP_SEED_HEX` from this CLIENT `.env`. A seed in a
+ * client file is a leaked private key, so it is removed rather than left behind
+ * for the next reader to copy — `loadBootstrapClientEnv` refuses to start with it
+ * present, so leaving it would be a boot failure waiting to happen.
+ */
+function removeEnvKeys(existing: string, keys: readonly string[]): string {
+  const wanted = new Set(keys);
+  const keep: string[] = [];
+  for (const line of existing.split(/\r?\n/)) {
+    const m = /^\s*([A-Za-z0-9_]+)\s*=/.exec(line);
+    if (m && wanted.has(m[1])) {
+      // Also drop a comment directly above that names the removed key.
+      while (keep.length > 0) {
+        const prev = keep[keep.length - 1].trim();
+        if (prev.startsWith('#') && keys.some((k) => prev.includes(k))) keep.pop();
+        else break;
+      }
+      continue;
+    }
+    keep.push(line);
+  }
+  return keep.join('\n').replace(/\n*$/, '\n');
+}
+
+/**
+ * Append the logging block to a `.env` that has none.
+ *
+ * Logging is a different concern from the bootstrap identity, so this is added
+ * ONCE, with the keys left EMPTY (the built-in default is `warn`), and never
+ * rewritten afterwards — the operator toggles it in place. `upsertEnvKeys` leaves
+ * unknown keys alone, so a value set here survives every later run.
+ *
+ * It exists because verbosity used to live in the component's `package.json` script
+ * (`P2PTS_LOG_LEVEL=info node …`) — POSIX-only syntax that PowerShell and cmd cannot
+ * parse. A fresh `.env` should therefore already say where the setting belongs.
+ */
+function withLoggingBlock(text: string): string {
+  if (/^\s*P2PTS_LOG_LEVEL\s*=/m.test(text)) return text;
+
+  const lines = text.split('\n');
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+  if (lines.length > 0) lines.push('');
+  lines.push(
+    '# ── Logging (optional) ──',
+    '# silent | error | warn | info | debug      (default: warn)',
+    'P2PTS_LOG_LEVEL=',
+    '# 1 turns on the [CEREMONY] OOBI→RFI→RFA trace lines (independent of the level).',
+    'CEREMONY_TRACE=',
+  );
+  return `${lines.join('\n')}\n`;
 }
 
 /**
@@ -187,23 +261,22 @@ function isIgnoredByDotGitignore(filePath: string): boolean {
     .some((p) => p === rel || p === name || p === `**/${name}` || p === `*/${name}`);
 }
 
-/** Resolve the word sequence from the chosen input, or generate a fresh one. */
-async function resolveSeed(args: Args): Promise<{ seed: Uint8Array; generatedMnemonic?: string }> {
-  if (args.generate) {
-    const seed = randomBytes(32);
-    const priv = await keys.generateKeyPairFromSeed('Ed25519', seed);
-    const { mnemonic } = exportSeedPhrase({ secretKey: seed, publicKey: priv.publicKey.raw });
-    return { seed: new Uint8Array(seed), generatedMnemonic: mnemonic };
-  }
+/**
+ * Resolve the RELAY's word sequence from the chosen input.
+ *
+ * There is deliberately no `--generate` branch: minting a new relay identity
+ * belongs to the bootstrap server, not to a client (see `main`).
+ */
+function resolveSeed(args: Args): Uint8Array {
   let words: string | undefined;
   if (args.words) words = args.words;
   else if (args.wordsFile) words = readFileSync(args.wordsFile, 'utf8').trim();
   if (!words) {
     throw new Error(
-      'No word sequence supplied. Pass --words, --words-file, or --generate (see --help).',
+      'No relay phrase supplied. Pass it with --words or --words-file (see --help).',
     );
   }
-  return { seed: mnemonicToSeed(words) };
+  return mnemonicToSeed(words);
 }
 
 // ---------------------------------------------------------------------------
@@ -223,30 +296,39 @@ async function main(): Promise<void> {
     );
     process.exit(1);
   }
+  if (args.generate) {
+    console.error(
+      'init-bootstrap-env: --generate is not available here.\n' +
+      '  This component is a CLIENT — the phrase identifies the RELAY, it does not\n' +
+      "  create an identity. Mint a new relay identity in the 'bootstrap' repo\n" +
+      '  (npm run init-bootstrap -- --generate), then pass that phrase here with\n' +
+      '  --words / --words-file.',
+    );
+    process.exit(1);
+  }
   if (!args.host) {
     console.error('init-bootstrap-env: --host <dns-or-ip> is required.\n');
     printHelp();
     process.exit(1);
   }
 
-  const { seed, generatedMnemonic } = await resolveSeed(args);
-  const seedHex = Buffer.from(seed).toString('hex');
+  const seed = resolveSeed(args);
   const priv = await keys.generateKeyPairFromSeed('Ed25519', seed);
   const peerId = (await peerIdFromPrivateKey(priv)).toString();
 
-  const env: BootstrapEnv = {
-    version: 1,
-    seedHex,
-    peerId,
+  // The seed exists ONLY to derive the peer ID — a public value. It is never persisted; see the
+  // CLIENT shape below.
+  const urls = buildBootstrapUrls({
     host: args.host,
     tcpPort: args.tcpPort,
     wsPort: args.wsPort,
-    enableRelay: args.enableRelay,
-  };
-  const urls = buildBootstrapUrls(env);
+    peerId,
+  });
 
+  // CLIENT shape: the peer ID + the address. NEVER BOOTSTRAP_SEED_HEX — a seed in a client .env is
+  // a leaked private key with no client use, and `loadBootstrapClientEnv` refuses to boot with one
+  // present.
   const updates: Record<string, string> = {
-    BOOTSTRAP_SEED_HEX: seedHex,
     BOOTSTRAP_PEER_ID: peerId,
     BOOTSTRAP_HOST: args.host,
     BOOTSTRAP_TCP_PORT: String(args.tcpPort),
@@ -257,24 +339,20 @@ async function main(): Promise<void> {
   const target = args.out ? resolve(args.out) : ENV_PATH;
 
   console.log('');
-  console.log('Bootstrap / relay identity');
-  console.log('──────────────────────────');
+  console.log('Bootstrap / relay — client configuration');
+  console.log('───────────────────────────────────────');
   console.log(`  Peer ID   : ${peerId}`);
   console.log(`  Host      : ${args.host}   (${args.tcpPort} tcp / ${args.wsPort} ws)`);
   console.log(`  TCP addr  : ${urls.tcpUrl}`);
   console.log(`  WS addr   : ${urls.wsUrl}`);
   console.log(`  Relay     : ${urls.relayAddr}`);
-  if (generatedMnemonic) {
-    console.log('');
-    console.log('  ⚠  NEW word sequence — write this down and store it securely.');
-    console.log('     It is the ONLY way to reproduce this peer ID:');
-    console.log('');
-    console.log(`     ${generatedMnemonic}`);
-  }
   console.log('');
 
   const existing = existsSync(target) ? readFileSync(target, 'utf8') : '';
-  const next = upsertEnvKeys(existing, updates);
+  // Upsert the client keys, STRIP any stale seed, then make sure the logging block exists.
+  const next = withLoggingBlock(
+    removeEnvKeys(upsertEnvKeys(existing, updates), ['BOOTSTRAP_SEED_HEX']),
+  );
   if (args.dryRun) {
     console.log(`[dry-run] would write ${target}:`);
     console.log(next.split('\n').map((l) => `    ${l}`).join('\n'));
@@ -283,13 +361,13 @@ async function main(): Promise<void> {
   if (!isGitIgnored(target)) {
     console.error(
       `init-bootstrap-env: refusing to write ${target} — it is NOT gitignored. ` +
-      'Add `.env` to .gitignore first so the seed can never be committed.',
+      'Add `.env` to .gitignore first so this config can never be committed by accident.',
     );
     process.exit(1);
   }
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, next, { mode: 0o600 });
-  console.log(`  ✓ wrote ${target}  (chmod 600)`);
+  console.log(`  ✓ wrote ${target}  (client: peer ID + address only, no seed; chmod 600)`);
   console.log('');
 }
 

@@ -89,13 +89,36 @@ they come from a gitignored `.env` written by `npm run init:bootstrap` (see
 wizard still works).
 
 ```sh
-# Derive this server's bootstrap seed / peer ID from a BIP-39 phrase file and
-# write ./.env (run from the utility-server repo root)
-npm run init:bootstrap -- --words-file ./phrase.txt --host mediator.fpndtg.com
+# Write ./.env from the relay's BIP-39 phrase. Keep the phrase file OUTSIDE this
+# repo (e.g. ~/data/phrase.txt) — it is the relay's PRIVATE KEY.
+npm run init:bootstrap -- --words-file ~/data/phrase.txt --host mediator.fpndtg.com
 ```
 
 The tool lives in `scripts/init-bootstrap-env.ts` and is **self-contained** — it
-only ever writes this repo's `./.env`, so no `--component` flag is needed.
+only ever writes this repo's `./.env`, so no `--component` flag is needed. It
+writes the **peer ID + address and never the seed**: this server is a *client* of
+the relay, and `loadBootstrapClientEnv` refuses to boot when a client `.env`
+carries `BOOTSTRAP_SEED_HEX`. Re-running the tool strips a stale one for you.
+
+### ⚠️ The shared development relay is public and NOT secure
+
+So that you can run a utility server (or an agent) without standing up your own
+bootstrap server, the Trust Stackers **development** relay's phrase is published
+here on purpose:
+
+```
+belt cream keep gain improve ginger milk lava special come boat sorry finish
+bomb miracle trend garment noble chicken range account gravity shoe sense
+```
+
+It derives peer ID `12D3KooWKF2Tmh21NNSH5gWazfbmFEtTZS9XT1uXk8njFAy5jUda` at host
+`mediator.fpndtg.com`. Because that phrase is public, **anyone can impersonate the
+relay** — treat anything you send through it as observable. Use it only for
+exploration and demos.
+
+**For anything real, run your own bootstrap server** (see the
+[`bootstrap`](https://github.com/TrustStackers/bootstrap) repo) and keep its
+phrase private — store it outside the repo, never commit it.
 
 | Var | Default | Meaning |
 |---|---|---|
