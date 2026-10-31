@@ -11,8 +11,7 @@
  *
  * ⚠ This is the SQLite **dev** path: it writes `utility-server/data/utility-server.db`
  * using the ROOT (SQLite) migration set. It is NOT how the server's real YugabyteDB
- * gets its schema — that happens when the server boots (`npm start`). See
- * docs/pqc-and-migration-policy.md §2.1.
+ * gets its schema — that happens when the server boots (`npm start`).
  *
  * `--reset` exists because the ledger (`schema_migrations`) keys on FILENAME: when a
  * migration file is removed as part of a fold-in (e.g. 0017–0019 into 0001–0016), the

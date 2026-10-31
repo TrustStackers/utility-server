@@ -5,9 +5,8 @@
  * Layer 3 — Trust Tasks: /auth routes (Scenario 2 — "Authenticate with a
  * VTA").
  *
- * Pure API component (no UI/dashboard surface — see
- * ../../../../docs/vta-dashboard-ui-plan.md, which explicitly scopes this
- * feature out of the dashboard). Documented on the public developer site
+ * Pure API component (no UI/dashboard surface). Documented on the public
+ * developer site
  * (site/developers/api-reference.html) under Layer 3 — Trust Tasks,
  * alongside credentials/status-lists/nonces, since VTA challenge-response
  * authentication is built directly on top of the nonces replay-protection

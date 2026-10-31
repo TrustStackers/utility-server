@@ -30,9 +30,8 @@
  * an approval decision made here (a new `credentials` row + a
  * `memberships` status flip) is not yet pushed back out over TSP to the
  * requester's own node, so two nodes' local views of the same membership
- * can silently diverge. This is a known gap — see
- * docs/utility-server-api-plan.md's "Cross-node sync" note — not an
- * oversight; closing it needs a real TSP message type (something like
+ * can silently diverge. This is a known gap — not an oversight; closing it
+ * needs a real TSP message type (something like
  * RFI/RFA's roles, but for membership join/approve) shared across every
  * node type, which is future work beyond this pass.
  */

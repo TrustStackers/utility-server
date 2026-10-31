@@ -4,9 +4,8 @@
 /**
  * Layer 5 — Trust Applications: POST /vtas
  *
- * VTA creation is an EDGE responsibility (per docs/one-scid-many-apps-architecture.md
- * Section 8.2). The utility server does NOT create VTAs — that is done locally
- * by the agent-app via ScidVhAgent.create().
+ * VTA creation is an EDGE responsibility. The utility server does NOT create
+ * VTAs — that is done locally by the agent-app via ScidVhAgent.create().
  *
  * This route now returns 410 Gone with a message directing users to the agent-app.
  * The utility server still stores VTAs pushed by agents via POST /identities/remote

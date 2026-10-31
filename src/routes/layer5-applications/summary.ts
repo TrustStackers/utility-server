@@ -8,7 +8,7 @@
  * VTNs, VRCs, and "Other Credentials" (every non-VRC credential type
  * combined: vmc + vec + custom_endorsement + delegation), plus a breakdown
  * of VTAs by subject_kind. A read-only composition over identities +
- * credentials, per docs/vta-dashboard-ui-plan.md.
+ * credentials.
  */
 
 import type { DataSource } from '@p2p-trust-stack/core/db/data-source.js';

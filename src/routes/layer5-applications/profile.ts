@@ -8,8 +8,7 @@
  * itself, its primary DID document, every membership it holds (as a
  * member), every delegation it participates in (as principal or
  * dependent), and every grant where it is the grantee — a read-only
- * composition over Layer 1-4 tables, per
- * ../../../../docs/utility-server-api-plan.md section 4 "Layer 5".
+ * composition over Layer 1-4 tables.
  */
 
 import type { DataSource } from '@p2p-trust-stack/core/db/data-source.js';

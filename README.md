@@ -25,15 +25,13 @@ from `../src/` that every other node in this repo uses.
 
 ## Status
 
-See `../docs/utility-server-api-plan.md` for the full API-by-API build plan.
 Layer 1 (Infrastructure), Layer 2 (Trust Spanning), Layer 3 (Trust
 Tasks — credentials/VCs, status lists, nonces), Layer 4 (Governance —
 memberships, personhood events, governance docs, delegations, grants), and
 Layer 5 (Trust Applications — composed profile/dashboard/graph views) are
 fully implemented.
 
-**Phase 5 (YugabyteDB Integration)**: See `../docs/phase5-yugabyte-integration-plan.md`
-for the full implementation plan. The utility server now uses YugabyteDB for all
+**Phase 5 (YugabyteDB Integration)**: The utility server now uses YugabyteDB for all
 trust task data, with serializable transaction isolation for name registration and
 VTC governance.
 
@@ -150,8 +148,7 @@ The utility server starts a **second, separate Fastify instance** on
 `RESOLVER_PORT` (default `8788`) that serves public `did:scid:vh` resolution.
 It is the only listener intended to face the internet; it has **no session
 auth, no admin routes, and no admin UI**, so the administrator dashboard stays
-private. See [`../docs/did-resolution-endpoint.md`](../docs/did-resolution-endpoint.md)
-for the full surface. Quick check:
+private. Quick check:
 
 ```sh
 curl -s http://localhost:8788/health

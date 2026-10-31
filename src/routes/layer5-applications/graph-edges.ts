@@ -4,8 +4,7 @@
 /**
  * Layer 5 — Trust Applications: GET /graph/edges
  *
- * DTG (Delegated Trust Graph)-conformant edge list. Per
- * ../../../../docs/utility-server-api-plan.md section 4 "Layer 5", the DTG
+ * DTG (Delegated Trust Graph)-conformant edge list. The DTG
  * models trust as signed credentials and delegations. Layer-2 libp2p peer
  * links (the `relationships` table) are also surfaced as 'peer' edges when
  * ?format=graph is requested, since the utility server's own connection to

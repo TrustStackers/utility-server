@@ -13,7 +13,7 @@
  * the governance repo) rather than reimplementing it — the bridge only adds framing.
  * Our `type` identifiers are `task:p2pts:…` (see `src/services/trust-tasks/type-uris.ts`).
  *
- * ## The correctness rule (docs/08 §7)
+ * ## The correctness rule
  *
  * A document carrying a `proof` whose issuer is NOT authenticated by this transport is
  * INDETERMINATE — we refuse it (401 `proof/unattributable`) rather than act as its

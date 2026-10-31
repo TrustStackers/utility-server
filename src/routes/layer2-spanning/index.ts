@@ -6,8 +6,6 @@
  *
  * Wires up the real /relationships and /messages routes (relationships.ts,
  * messages.ts), driven by the live libp2p node passed in from index.ts.
- *
- * See ../../../../docs/utility-server-api-plan.md section 4 "Layer 2".
  */
 
 import type { FastifyInstance } from 'fastify';

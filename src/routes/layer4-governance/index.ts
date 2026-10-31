@@ -5,8 +5,7 @@
  * Layer 4 — Governance route registration.
  *
  * Wires up /communities/:id/memberships, /memberships/:id/*,
- * /communities/:id/governance, /delegations, and /grants — see
- * ../../../../docs/utility-server-api-plan.md section 4 "Layer 4".
+ * /communities/:id/governance, /delegations, and /grants.
  */
 
 import type { FastifyInstance } from 'fastify';

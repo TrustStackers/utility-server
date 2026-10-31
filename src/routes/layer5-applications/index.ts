@@ -6,8 +6,7 @@
  *
  * Wires up the real /identities/:id/profile, /communities/:id/dashboard,
  * and /graph/edges routes — each a read-only, cross-cutting composition
- * over the Layer 1-4 tables. See
- * ../../../../docs/utility-server-api-plan.md section 4 "Layer 5".
+ * over the Layer 1-4 tables.
  *
  * The webhook/event-subscription surface mentioned in the plan ("Later:
  * webhook/event subscription endpoints for external Layer 4 apps") remains

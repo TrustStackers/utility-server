@@ -4,8 +4,7 @@
 /**
  * Layer 5 — Trust Applications: VTN affiliation, hierarchy, and
  * effective-policy routes (Scenario 9 — "VTNs & Nested Communities",
- * see mockup/vtn-network.html and
- * docs/cross-layer-integration-plan.md Decision 2.8).
+ * see mockup/vtn-network.html).
  *
  * - PATCH /vtcs/:id/affiliate      — affiliate a VTC (:id) with a parent VTN
  * - POST  /vtcs/:id/unaffiliate    — clear a VTC's parent VTN affiliation

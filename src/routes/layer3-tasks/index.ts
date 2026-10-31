@@ -4,8 +4,7 @@
 /**
  * Layer 3 — Trust Tasks (credentials/VCs) route registration.
  *
- * Wires up /credentials, /status-lists, and /nonces — see
- * ../../../../docs/utility-server-api-plan.md section 4 "Layer 3".
+ * Wires up /credentials, /status-lists, and /nonces.
  */
 
 import type { FastifyInstance } from 'fastify';

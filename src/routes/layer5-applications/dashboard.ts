@@ -7,8 +7,7 @@
  * Assembled, cross-cutting view of a community (VTC/VTN): its governance
  * parameters, its full membership roster (grouped by status), and the
  * count of memberships awaiting approval — a read-only composition over
- * Layer 1-4 tables, per
- * ../../../../docs/utility-server-api-plan.md section 4 "Layer 5".
+ * Layer 1-4 tables.
  */
 
 import type { DataSource } from '@p2p-trust-stack/core/db/data-source.js';
