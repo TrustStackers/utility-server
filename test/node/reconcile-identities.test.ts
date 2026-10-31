@@ -25,12 +25,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { SqliteDataSource } from '@p2p-trust-stack/core/db/sqlite-data-source.js';
 import type { DataSource } from '@p2p-trust-stack/core/db/data-source.js';
 import { runMigrations } from '@p2p-trust-stack/core/db/migrate.js';
 import { didToUuid } from '@p2p-trust-stack/core/db/uuid-helpers.js';
 import { reconcileIdentities } from '@p2p-trust-stack/core/db/reconcile-identities.js';
 import { getMigrationsDir } from '@p2p-trust-stack/core/db/migrations-dir.js';
+
+/**
+ * Resolve the installed @p2p-trust-stack/core instead of assuming `../../node_modules/...`, so the
+ * source scan below works whether dependencies are nested (a standalone clone) or hoisted
+ * (npm workspaces / a different package manager).
+ */
+const CORE_DIR = dirname(createRequire(import.meta.url).resolve('@p2p-trust-stack/core/package.json'));
 
 const MIGRATIONS_DIR = getMigrationsDir();
 
@@ -387,8 +397,8 @@ function stripComments(fileUrl: URL): string {
 
 test('reconcile path SQL stays dialect-portable (it runs against YugabyteDB, not SQLite)', () => {
   const files: Array<[string, URL]> = [
-    ['src/db/reconcile-identities.ts', new URL('../../node_modules/@p2p-trust-stack/core/src/db/reconcile-identities.ts', import.meta.url)],
-    ['src/db/repositories/did-documents-repo.ts', new URL('../../node_modules/@p2p-trust-stack/core/src/db/repositories/did-documents-repo.ts', import.meta.url)],
+    ['src/db/reconcile-identities.ts', pathToFileURL(join(CORE_DIR, 'src/db/reconcile-identities.ts'))],
+    ['src/db/repositories/did-documents-repo.ts', pathToFileURL(join(CORE_DIR, 'src/db/repositories/did-documents-repo.ts'))],
   ];
 
   for (const [label, url] of files) {

@@ -14,6 +14,7 @@ import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import type { Libp2p } from 'libp2p';
 import type { DataSource } from '@p2p-trust-stack/core/db/data-source.js';
 import type { TransactionManager } from '@p2p-trust-stack/core/tx/manager.js';
@@ -121,8 +122,10 @@ export function buildServer(deps: AppDeps): FastifyInstance {
     prefix: '/ui/',
   });
 
-  // Serve cytoscape.js from node_modules (npm dependency, not CDN)
-  const cyDistPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', 'cytoscape', 'dist', 'cytoscape.min.js');
+  // Serve cytoscape.js from node_modules (npm dependency, not CDN). Resolve it instead of assuming
+  // `<this repo>/node_modules/…`, so the path still works when dependencies are hoisted (npm
+  // workspaces) or installed by a different package manager.
+  const cyDistPath = createRequire(import.meta.url).resolve('cytoscape/dist/cytoscape.min.js');
   const cyContent = readFileSync(cyDistPath, 'utf-8');
   app.get('/lib/cytoscape.min.js', async (_req, reply) => {
     return reply.type('application/javascript').send(cyContent);
