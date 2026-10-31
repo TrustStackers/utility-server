@@ -8,7 +8,7 @@
  * apply effect) inside one transaction.
  *
  * Run:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs \
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs \
  *     --test test/tx/governance-change-participant.test.ts
  */
 import { test } from 'node:test';

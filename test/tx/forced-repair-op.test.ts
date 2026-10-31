@@ -28,7 +28,7 @@
  * restores exactly one active row holding the agent's LIVE key.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/tx/forced-repair-op.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/tx/forced-repair-op.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

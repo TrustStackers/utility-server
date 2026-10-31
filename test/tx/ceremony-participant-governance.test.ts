@@ -11,7 +11,7 @@
  * tests pin the closure.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs \
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs \
  *     --test test/tx/ceremony-participant-governance.test.ts
  */
 import { test } from 'node:test';

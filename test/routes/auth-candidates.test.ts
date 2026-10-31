@@ -16,7 +16,7 @@
  *   - `/identities` still refuses without one (the exception must not re-open the rest).
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/routes/auth-candidates.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/routes/auth-candidates.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

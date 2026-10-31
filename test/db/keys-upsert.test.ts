@@ -20,7 +20,7 @@
  *   DO UPDATE SET ... upsert, so the unique constraint merges instead of aborting.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/db/keys-upsert.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/db/keys-upsert.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

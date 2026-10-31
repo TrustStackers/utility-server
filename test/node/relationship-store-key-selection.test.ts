@@ -24,7 +24,7 @@
  * still falling back to any active key so a peer is never left keyless.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/node/relationship-store-key-selection.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/node/relationship-store-key-selection.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

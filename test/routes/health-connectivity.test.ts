@@ -15,7 +15,7 @@
  * reporting an empty object as if everything were fine.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/routes/health-connectivity.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/routes/health-connectivity.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

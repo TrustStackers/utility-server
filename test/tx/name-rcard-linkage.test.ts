@@ -21,7 +21,7 @@
  *      profile_id + profile_uuid atomically in the INSERT transaction.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/tx/name-rcard-linkage.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/tx/name-rcard-linkage.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

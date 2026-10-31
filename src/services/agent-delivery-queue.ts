@@ -45,6 +45,20 @@ interface PendingDeliveryRow {
   idempotency_key: string | null;
 }
 
+/**
+ * Minimum spacing between FORCED per-member flushes.
+ *
+ * `flushForMember` deliberately ignores `next_retry_at` (a peer:connect means the
+ * member is reachable NOW), but it was unbounded. A connectivity loop that
+ * reconnects a member every ~90 s — the relay/bootstrap churn observed
+ * 2026-10-29 — re-materialized and re-transmitted the SAME pending row on every
+ * cycle with no backoff at all (identical 81,820-byte `tx_prepare` frames in the
+ * field log, one per cycle). This caps the forced path at one flush per member
+ * per window. The 5 s drain still delivers as soon as the member is reachable,
+ * so nothing is delayed — only the redundant re-sends are removed.
+ */
+const MEMBER_FLUSH_MIN_INTERVAL_MS = 30_000;
+
 function calculateNextRetry(attempts: number): number {
   const baseDelayMs = 30_000;
   const maxDelayMs = 86_400_000;
@@ -67,6 +81,21 @@ export class AgentDeliveryQueue implements ExchangeFanoutStore {
    * reconciled with the authoritative connection table on every drain.
    */
   private readonly connectedPeers = new Set<string>();
+
+  /**
+   * Re-entrancy guard for `drain()`. The drain is driven by a 5 s timer AND by
+   * every `peer:connect` (markPeerConnected) AND by the connectivity
+   * supervisor's reconnect path; overlapping drains each read the same pending
+   * rows and each materialize + transmit them. The row-level claim in
+   * `deliverOne` makes that safe rather than correct — it does not make it free.
+   */
+  private drainInProgress = false;
+
+  /** Members with a forced flush currently running — at most one per member. */
+  private readonly memberFlushInFlight = new Set<string>();
+
+  /** Start time of the last forced flush per member (MEMBER_FLUSH_MIN_INTERVAL_MS). */
+  private readonly lastMemberFlushAt = new Map<string, number>();
 
   constructor(
     db: DataSource,
@@ -267,6 +296,15 @@ export class AgentDeliveryQueue implements ExchangeFanoutStore {
   }
 
   async drain(): Promise<void> {
+    // Re-entrancy guard — see `drainInProgress`. Without it the 5 s timer, every
+    // peer:connect and the supervisor's reconnect flush all ran concurrently,
+    // each reading the same pending rows and each materializing + transmitting
+    // them. The row-level claim in `deliverOne` prevents a double-delivery of the
+    // same row, but the redundant materialization and wire attempts were real —
+    // and during a reconnect storm this is where the duplicated-looking inbound
+    // frames on the agent side came from.
+    if (this.drainInProgress) return;
+    this.drainInProgress = true;
     try {
       const now = Math.floor(Date.now() / 1000);
       const pending = await this.db.all<PendingDeliveryRow>(
@@ -280,10 +318,27 @@ export class AgentDeliveryQueue implements ExchangeFanoutStore {
       for (const row of pending) await this.deliverOne(row);
     } catch (err) {
       console.error('[AgentDeliveryQueue] drain error:', (err as Error)?.message ?? err);
+    } finally {
+      this.drainInProgress = false;
     }
   }
 
   async flushForMember(memberUuid: string): Promise<void> {
+    // Two guards, both aimed at the RECONNECT-STORM case (relay/bootstrap churn
+    // reconnecting the same member every ~90 s — observed 2026-10-29):
+    //
+    //  - in-flight: a second flush for the same member while one is running would
+    //    re-send every row in the window;
+    //  - min-interval: unbounded forced flushes meant the same pending row was
+    //    re-materialized and re-transmitted on every reconnect cycle with no
+    //    backoff. The 5 s drain still covers delivery as soon as the member is
+    //    reachable, so capping the FORCED path loses nothing.
+    if (this.memberFlushInFlight.has(memberUuid)) return;
+    const lastFlushAt = this.lastMemberFlushAt.get(memberUuid) ?? 0;
+    if (Date.now() - lastFlushAt < MEMBER_FLUSH_MIN_INTERVAL_MS) return;
+
+    this.memberFlushInFlight.add(memberUuid);
+    this.lastMemberFlushAt.set(memberUuid, Date.now());
     try {
       // Recover any permanently-failed deliveries for this member: when the agent
       // is reachable again (reconnect), a previous maxed-out queue entry becomes
@@ -306,6 +361,8 @@ export class AgentDeliveryQueue implements ExchangeFanoutStore {
       for (const row of pending) await this.deliverOne(row, { force: true });
     } catch (err) {
       console.error(`[AgentDeliveryQueue] flush error:`, (err as Error)?.message ?? err);
+    } finally {
+      this.memberFlushInFlight.delete(memberUuid);
     }
   }
 

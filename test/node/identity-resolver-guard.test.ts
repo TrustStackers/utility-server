@@ -19,7 +19,7 @@
  * still creates first-contact identities.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/node/identity-resolver-guard.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/node/identity-resolver-guard.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

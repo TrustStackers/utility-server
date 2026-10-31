@@ -34,7 +34,7 @@
  *     written across identities
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/db/did-documents-promote.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/db/did-documents-promote.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

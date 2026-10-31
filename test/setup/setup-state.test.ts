@@ -17,6 +17,9 @@ import {
   saveSetupConfig,
 } from '../../src/setup/setup-state.js';
 
+/** A well-formed libp2p peer ID (base58btc), for the bootstrap round-trip test. */
+const PEER_ID = '12D3KooWKF2Tmh21NNSH5gWazfbmFEtTZS9XT1uXk8njFAy5jUda';
+
 function withTempDataDir(fn: () => void): void {
   const dir = mkdtempSync(join(tmpdir(), 'p2pts-setup-'));
   process.env.UTILITY_DATA_DIR = dir;
@@ -62,6 +65,9 @@ test('save + load round-trips the setup config with default network', async () =
     assert.equal(loaded.network.advertisedHost, '127.0.0.1');
     assert.equal(loaded.network.httpPort, 8787);
     assert.equal(loaded.network.libp2pPort, 4003);
+    // No bootstrap override recorded → the server falls back to its `.env`.
+    assert.equal(loaded.network.bootstrapHost, '');
+    assert.equal(loaded.network.bootstrapPeerId, '');
   });
 });
 
@@ -70,7 +76,13 @@ test('saveSetupConfig preserves network overrides', async () => {
     const cfg = buildSetupConfig({
       mode: 'vtn_host',
       adminVtaUuid: 'vta-1',
-      network: { advertisedHost: '203.0.113.5', httpPort: 8790, libp2pPort: 4005 },
+      network: {
+        advertisedHost: '203.0.113.5',
+        httpPort: 8790,
+        libp2pPort: 4005,
+        bootstrapHost: 'bootstrap.example.com',
+        bootstrapPeerId: PEER_ID,
+      },
       currentStep: 4,
       completed: false,
     });
@@ -79,5 +91,9 @@ test('saveSetupConfig preserves network overrides', async () => {
     assert.equal(loaded.network.advertisedHost, '203.0.113.5');
     assert.equal(loaded.network.httpPort, 8790);
     assert.equal(loaded.network.libp2pPort, 4005);
+    // The bootstrap override survives the round trip — it is what makes a host
+    // able to run several utility servers against different bootstrap servers.
+    assert.equal(loaded.network.bootstrapHost, 'bootstrap.example.com');
+    assert.equal(loaded.network.bootstrapPeerId, PEER_ID);
   });
 });

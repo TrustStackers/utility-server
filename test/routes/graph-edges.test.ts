@@ -22,7 +22,7 @@
  * executes verbatim.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/routes/graph-edges.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/routes/graph-edges.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -256,6 +256,105 @@ test('GET /graph/edges (legacy edge-list format) still works from the uuid-first
     assert.equal(vrc.to, bUuid);
     assert.equal(vrc.id, `credential:${credUuid}`);
     assert.equal(vrc.credentialId, credUuid);
+  } finally {
+    await app.close();
+    await ds.close();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// The VTN key on the utility-server / VTN node labels
+//
+// The graph names the network a node serves — `utility-server (p2pts)` — the
+// same way the bootstrap dashboard renders `Utl Server (p2pts)`. The key comes
+// from `namespace_config`, a table that ships ONLY in the utility server's own
+// Postgres migrations (0501); the core SQLite schema these tests migrate omits
+// it deliberately, so the route reads it best-effort and the table is created
+// here by hand. That is also the proof that its absence (every other test in
+// this file) leaves the graph untouched.
+// ---------------------------------------------------------------------------
+
+const VTN_UUID = '44444444-4444-4444-8444-444444444444';
+const SERVER_UUID = '55555555-5555-4555-8555-555555555555';
+
+/** Create the utility-server-only binding table and seed the VTN + the server's own VTA. */
+async function seedNamespace(
+  ds: SqliteDataSource,
+  opts: { vtnName: string; namespace: string },
+): Promise<void> {
+  await ds.run(`
+    CREATE TABLE IF NOT EXISTS namespace_config (
+      uuid TEXT PRIMARY KEY,
+      vtn_identity_uuid TEXT NOT NULL UNIQUE,
+      namespace TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  const now = Math.floor(Date.now() / 1000);
+  // The namespace VTN created by setup (role='vtn') …
+  await ds.run(
+    `INSERT INTO identities (uuid, role, subject_kind, custody, name, created_at, updated_at)
+     VALUES (?, 'vtn', 'organization', 'remote', ?, ?, ?)`,
+    VTN_UUID, opts.vtnName, now, now,
+  );
+  // … and this server's own organization VTA (role='vta', subject_kind='organization').
+  await ds.run(
+    `INSERT INTO identities (uuid, role, subject_kind, custody, name, created_at, updated_at)
+     VALUES (?, 'vta', 'organization', 'local', 'utility-server', ?, ?)`,
+    SERVER_UUID, now, now,
+  );
+  // Distinct Ed25519 keys: the canonicalization pass groups by shared key bytes, and the
+  // query's `encode(public_key, 'hex')` needs a non-NULL blob.
+  for (const [uuid, fill] of [[VTN_UUID, '44'], [SERVER_UUID, '55']] as const) {
+    await ds.run(
+      `INSERT INTO keys (uuid, identity_uuid, key_type, public_key, rotation_version, created_at)
+       VALUES (?, ?, 'ed25519', ?, 0, ?)`,
+      generateUuid(), uuid, Buffer.from(fill.repeat(32), 'hex'), now,
+    );
+  }
+  await ds.run(
+    `INSERT INTO namespace_config (uuid, vtn_identity_uuid, namespace, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    generateUuid(), VTN_UUID, opts.namespace, now, now,
+  );
+}
+
+test('GET /graph/edges?format=graph puts the served VTN key on the utility-server and VTN labels', async () => {
+  const ds = makeAppDb();
+  const app = Fastify();
+  registerGraphEdgesRoute(app, ds);
+  try {
+    await seedNamespace(ds, { vtnName: 'Trust Stackers', namespace: 'p2pts' });
+
+    const res = await app.inject({ method: 'GET', url: '/graph/edges?format=graph' });
+    assert.equal(res.statusCode, 200, res.body);
+    const body = res.json();
+
+    const label = (uuid: string): string | undefined =>
+      body.nodes.find((n: { id: string }) => n.id === uuid)?.label;
+    assert.equal(label(VTN_UUID), 'Trust Stackers (p2pts)', 'the VTN node names the network key');
+    assert.equal(label(SERVER_UUID), 'utility-server (p2pts)', 'the server node names the network key');
+  } finally {
+    await app.close();
+    await ds.close();
+  }
+});
+
+test('the VTN key is not duplicated when the VTN name already IS the key', async () => {
+  const ds = makeAppDb();
+  const app = Fastify();
+  registerGraphEdgesRoute(app, ds);
+  try {
+    // A VTN named after its own namespace (`p2pts`) must read `p2pts`, not `p2pts (p2pts)`.
+    await seedNamespace(ds, { vtnName: 'p2pts', namespace: 'p2pts' });
+
+    const res = await app.inject({ method: 'GET', url: '/graph/edges?format=graph' });
+    assert.equal(res.statusCode, 200, res.body);
+    const body = res.json();
+
+    const vtn = body.nodes.find((n: { id: string }) => n.id === VTN_UUID);
+    assert.equal(vtn?.label, 'p2pts');
   } finally {
     await app.close();
     await ds.close();

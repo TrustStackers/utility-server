@@ -53,13 +53,19 @@ import { createPolicyEngine } from '@p2p-trust-stack/core/services/policy-engine
 import { CeremonyCoordinator } from '@p2p-trust-stack/core/tx/index.js';
 
 import { BootstrapClient } from '@p2p-trust-stack/core/transport/bootstrap-client.js';
-import { loadBootstrapEnv, buildBootstrapUrls } from '@p2p-trust-stack/core/config/bootstrap-env.js';
+import {
+  loadBootstrapClientEnv,
+  buildBootstrapUrls,
+  type BootstrapClientEnv,
+} from '@p2p-trust-stack/core/config/bootstrap-env.js';
+import { applyLoggingEnv } from '@p2p-trust-stack/core/config/logging-env.js';
 import { buildDialableMultiaddrs } from '@p2p-trust-stack/core/platform/network-detect.js';
 
 import { cesrEncode, CESR_CODES } from '@p2p-trust-stack/core/crypto/cesr.js';
 import { decryptSecretKey } from '@p2p-trust-stack/core/keystore/sqlite-keystore.js';
 import { buildDidPeer4Document } from '@p2p-trust-stack/core/did/create.js';
 import * as keysRepo from '@p2p-trust-stack/core/db/repositories/keys-repo.js';
+import * as identitiesRepo from '@p2p-trust-stack/core/db/repositories/identities-repo.js';
 import * as didDocumentsRepo from '@p2p-trust-stack/core/db/repositories/did-documents-repo.js';
 import type { DidDocument } from '@p2p-trust-stack/core/did/types.js';
 
@@ -94,7 +100,57 @@ async function tryLoadSecretKeyPair(
   return { publicKey: new Uint8Array(row.publicKey), secretKey };
 }
 
+/**
+ * Resolve this server's bootstrap **client** config.
+ *
+ * Precedence: the setup wizard's persisted values → this component's `.env` →
+ * nothing. The wizard's network step pre-fills both fields from `.env` and lets
+ * the operator replace them, so a host running several utility servers can point
+ * each one at a different bootstrap server without editing files.
+ *
+ * Returns `null` rather than throwing when neither source yields a usable pair:
+ * an unconfigured (or .env-less) server must still boot so the first-launch
+ * setup wizard is reachable. `null` means LAN-only mode.
+ *
+ * This server is a CLIENT — it holds no seed, only the address and the peer ID to
+ * expect (`loadBootstrapClientEnv` refuses a client file that still carries one).
+ */
+function resolveBootstrapClientEnv(network: {
+  bootstrapHost: string;
+  bootstrapPeerId: string;
+}): BootstrapClientEnv | null {
+  let env: BootstrapClientEnv | null = null;
+  try {
+    env = loadBootstrapClientEnv({ path: join(__dirname, '..', '.env') });
+  } catch (err) {
+    console.warn(
+      `[utility-server] Bootstrap .env unavailable (${(err as Error).message}) — ` +
+      'falling back to the setup configuration, or LAN-only mode.',
+    );
+  }
+
+  // A wizard value wins; an EMPTY wizard value means "accept the .env default".
+  const host = network.bootstrapHost.trim() || env?.host || '';
+  const peerId = network.bootstrapPeerId.trim() || env?.peerId || '';
+  if (!host || !peerId) return null;
+
+  return {
+    version: 1,
+    host,
+    peerId,
+    tcpPort: env?.tcpPort ?? 4001,
+    wsPort: env?.wsPort ?? 4002,
+    enableRelay: env?.enableRelay ?? true,
+  };
+}
+
 async function main(): Promise<void> {
+  // Verbosity comes from this component's `.env` — the same file the bootstrap
+  // block lives in, and the reason the npm script needs no `P2PTS_LOG_LEVEL=info`
+  // prefix (which PowerShell and cmd cannot parse). Cannot throw: a missing or
+  // malformed `.env` leaves logging at the environment/default level.
+  applyLoggingEnv({ path: join(__dirname, '..', '.env') });
+
   const config = loadConfig();
 
   // First-launch detection: an unconfigured instance boots the full node but
@@ -596,21 +652,27 @@ async function main(): Promise<void> {
   // logged "continuing in LAN-only mode", and was never attempted again — so
   // the server never appeared in discovery and never held a relay reservation.
 
-  // Resolve the bootstrap/relay identity + address from `utility-server/.env`
-  // (written by `npm run init:bootstrap`). A missing config is NOT fatal here:
+  // Resolve the bootstrap/relay identity + address: the setup wizard's persisted
+  // override wins, then this component's `.env` (written by
+  // `npm run init:bootstrap`), then LAN-only. A missing config is NOT fatal here:
   // the server must still boot so the first-launch setup wizard is reachable.
-  // Without it the server simply runs in LAN-only mode. There is no hardcoded
-  // address and no `process.env` override — see src/config/bootstrap-env.ts.
+  // There is no hardcoded address and no `process.env` override — see
+  // @p2p-trust-stack/core/config/bootstrap-env.
+  const bootstrapEnv = resolveBootstrapClientEnv(setupCfg.network);
+
   let bootstrapClient: BootstrapClient | null = null;
-  try {
-    const { tcpUrl, wsUrl } = buildBootstrapUrls(
-      loadBootstrapEnv({ path: join(__dirname, '..', '.env') }),
-    );
+  if (bootstrapEnv) {
+    const { tcpUrl, wsUrl } = buildBootstrapUrls(bootstrapEnv);
     bootstrapClient = new BootstrapClient(tcpUrl, wsUrl);
-  } catch (err) {
+    console.log(
+      `[utility-server] bootstrap target ${bootstrapEnv.host}:${bootstrapEnv.tcpPort} ` +
+      `(peer ${bootstrapEnv.peerId.slice(0, 12)}...)`,
+    );
+  } else {
     console.warn(
-      `[utility-server] Bootstrap config unavailable (${(err as Error)?.message ?? err}) — ` +
-      'running in LAN-only mode. Run `npm run init:bootstrap` to configure it.',
+      '[utility-server] No bootstrap address + peer ID (neither the setup wizard nor ' +
+      '.env supplied a usable pair) — running in LAN-only mode. Run ' +
+      '`npm run init:bootstrap` or set them in the setup wizard.',
     );
   }
 
@@ -666,17 +728,24 @@ async function main(): Promise<void> {
     // OOBI (vid, peerId, multiaddrs, did) for TSP connection establishment.
     //
     // Announce the peer DESIGNATION the bootstrap stores and displays:
-    //   - `agentName` — this server's own node name (`NODE_NAME`, default
-    //     'utility-server'), shown by the bootstrap's peer list beside the peer
-    //     ID. This was previously OMITTED: the server sent a `net` but no
-    //     `agentName`, and because `name_uri` is only derived when BOTH are
-    //     present, the bootstrap rendered the server's row as a bare peer ID
-    //     with neither name nor namespace.
-    //   - `net` — the network/group (namespace) this server serves, e.g. 'p2pts',
-    //     so the bootstrap can scope discovery to it and show the peer's group.
+    //   - `net` — the VTN **key** (namespace) this server serves, e.g. 'p2pts'.
+    //     This is the identifier: agents match on it to find the utility server
+    //     for the VTN they want, and the bootstrap renders `Utl Server (p2pts)`.
+    //   - `vtnName` — the VTN's human-readable name (e.g. 'Trust Stackers'), a
+    //     UTILITY-ONLY optional field carried separately so a display name can
+    //     never be confused with — or collide against — an agent's user name.
+    //   - `agentName` — this server's own node name (`NODE_NAME`), which says
+    //     nothing about which network it hosts; the bootstrap shows it only as a
+    //     secondary detail now that `net` identifies the row.
     let net: string | undefined;
+    let vtnName: string | undefined;
     try {
-      net = (await getNamespaceConfig(ds))?.namespace;
+      const ns = await getNamespaceConfig(ds);
+      net = ns?.namespace;
+      if (ns?.vtnIdentityUuid) {
+        const vtn = await identitiesRepo.findByUuid(ds, ns.vtnIdentityUuid);
+        vtnName = vtn?.name ?? undefined;
+      }
     } catch { /* best-effort — namespace may not be configured yet */ }
 
     const result = await bootstrapClient.register(
@@ -690,11 +759,16 @@ async function main(): Promise<void> {
         name: config.nodeName,
         subjectKind: 'organization',
       },
-      // The designation MUST carry `agentName` (the server's name) as well as
-      // `net` (the namespace) — see the comment above.
-      { agentName: config.nodeName, ...(net ? { net } : {}) },
+      {
+        agentName: config.nodeName,
+        ...(net ? { net } : {}),
+        ...(vtnName ? { vtnName } : {}),
+      },
     );
-    console.log(`[utility-server] bootstrap registration OK — discovered ${result.connectedPeers.length} peer(s)`);
+    console.log(
+      `[utility-server] bootstrap registration OK — VTN ${net ?? '(unbound)'}` +
+      `${vtnName ? ` "${vtnName}"` : ''} — discovered ${result.connectedPeers.length} peer(s)`,
+    );
 
     if (result.relayAddr) {
       bootstrapRelayAddr = result.relayAddr;
@@ -866,6 +940,37 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown('signal'));
   process.on('SIGTERM', () => void shutdown('signal'));
 }
+
+/**
+ * Last-resort process guard — installed BEFORE `main()` runs.
+ *
+ * A long-running trust node must survive a transient dependency failure. On
+ * 2026-10-29 a single YugabyteDB tserver RPC timeout ("XX000 / Timed out waiting
+ * kResponseSent, state: kProcessingRequest") reached the TSP bridge's
+ * fire-and-forget libp2p message handler, became an unhandled rejection, and —
+ * under Node's default `--unhandled-rejections=throw` — terminated the utility
+ * server outright. The log ended with the Node version banner and a shell
+ * prompt; every agent delivery queued behind it stalled.
+ *
+ * The ROOT CAUSE is fixed at both ends (Libp2pTransport.dispatchMessage() now
+ * contains a rejecting handler, and the TSP bridge's own handler has an error
+ * boundary). This handler is the backstop for the class, not the fix: any future
+ * unawaited promise anywhere in the process logs instead of killing it.
+ *
+ * Deliberately ONLY `unhandledRejection`. An `uncaughtException` means a
+ * synchronous throw escaped to the top of the stack — the process state is
+ * genuinely unknown at that point, and continuing to serve trust data from an
+ * unknown state is worse than stopping, so that keeps Node's default
+ * (log + exit).
+ */
+process.on('unhandledRejection', (reason) => {
+  const err = reason as { message?: string; stack?: string };
+  console.error(
+    '[utility-server] unhandled rejection (process kept alive):',
+    err?.message ?? reason,
+    err?.stack ? `\n${err.stack}` : '',
+  );
+});
 
 main().catch((err) => {
   console.error('[utility-server] fatal error during startup:', err);

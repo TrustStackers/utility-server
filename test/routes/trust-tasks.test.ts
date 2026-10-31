@@ -15,7 +15,7 @@
  *  4. **`upsert` persists and `validate`/`evaluate`/`test` do not** (read the row back).
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/routes/trust-tasks.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/routes/trust-tasks.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

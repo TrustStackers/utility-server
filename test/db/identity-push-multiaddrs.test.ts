@@ -21,7 +21,7 @@
  * level the supervisor actually reads.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs \
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs \
  *     --test test/db/identity-push-multiaddrs.test.ts
  */
 import { test } from 'node:test';

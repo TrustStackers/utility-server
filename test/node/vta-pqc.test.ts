@@ -20,7 +20,7 @@
  * would invalidate someone else's published key.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/node/vta-pqc.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/node/vta-pqc.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

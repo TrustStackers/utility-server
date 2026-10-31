@@ -20,7 +20,7 @@
  * a boolean". A store-only test would pass even if the plugin never consulted it.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/services/session-revocation.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/services/session-revocation.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

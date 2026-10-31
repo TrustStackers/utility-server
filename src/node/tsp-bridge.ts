@@ -394,7 +394,28 @@ async function routeProtocolMessage(
   remoteDid: Vid,
   inboundTx?: InboundTxRouter,
 ): Promise<void> {
-  const fromDoc = await didDocumentsRepo.findByPeerId(db, fromAddr.peerId);
+  // Resolved LAZILY, on first use, and reused within the frame.
+  //
+  // This is a three-table join (did_documents × identities × peer_endpoints) and
+  // it used to run on EVERY inbound frame — including the JSON fallback path,
+  // which never reads the result. Two costs, both observed on 2026-10-29:
+  //
+  //  * load: it is the single most frequent query the bridge issues, once per
+  //    frame, for data only the tx path and the two message-store branches use;
+  //  * blast radius: being the FIRST statement in the function made it the first
+  //    thing to fail when the tablet server stalled, so a transient DB error was
+  //    raised before the message was even classified.
+  //
+  // Deliberately NOT a TTL cache. Caching a NEGATIVE result would turn a
+  // just-connected agent's first `tx_prepare` into `senderVid=undefined`, i.e. a
+  // silently indeterminate operation-proof binding instead of a real check —
+  // trading a query for a security-relevant behaviour change. Lazy is the whole
+  // win here, with identical semantics.
+  let fromDocPromise: Promise<didDocumentsRepo.DidDocumentRow | null> | undefined;
+  const fromDoc = (): Promise<didDocumentsRepo.DidDocumentRow | null> => {
+    fromDocPromise ??= didDocumentsRepo.findByPeerId(db, fromAddr.peerId);
+    return fromDocPromise;
+  };
 
   let protocolMsg;
   try { protocolMsg = decodeProtocolMessage(body); }
@@ -425,7 +446,7 @@ async function routeProtocolMessage(
         // was reported `invalid` (observed 2026-09-25) and `enforce` would have refused all
         // cross-node work. An unknown key yields `undefined`, and the binding is then
         // honestly `indeterminate` rather than a false substitution.
-        const senderVid = await resolveOperationVid(db, fromDoc?.uuid);
+        const senderVid = await resolveOperationVid(db, (await fromDoc())?.uuid);
         const refusal = proofRefusalResponse(txMsg, { senderVid });
         if (refusal) {
           await sendTspGenResponse(transport, fromAddr, remoteDid, {
@@ -476,7 +497,7 @@ async function routeProtocolMessage(
     // message between peers IS chat traffic.
     if (shouldStoreUnrecognisedProtocol(protocolMsg.protocol)) {
       await messagesRepo.create(db, {
-        fromDidDocumentUuid: fromDoc?.uuid ?? null,
+        fromDidDocumentUuid: (await fromDoc())?.uuid ?? null,
         toDidDocumentUuid: null,
         type: `tsp-${protocolMsg.protocol}`,
         payload: new Uint8Array(body),
@@ -485,7 +506,7 @@ async function routeProtocolMessage(
     }
     console.warn(
       describeUnrecognisedProtocolRefusal(protocolMsg.protocol, {
-        fromDidDocumentUuid: fromDoc?.uuid ?? null,
+        fromDidDocumentUuid: (await fromDoc())?.uuid ?? null,
         bodyLength: body.length,
       }),
     );
@@ -493,7 +514,7 @@ async function routeProtocolMessage(
   } else {
     // ── Raw message — store for later inspection ─────────────────────
     await messagesRepo.create(db, {
-      fromDidDocumentUuid: fromDoc?.uuid ?? null,
+      fromDidDocumentUuid: (await fromDoc())?.uuid ?? null,
       toDidDocumentUuid: null,
       type: 'tsp-raw',
       payload: new Uint8Array(body),
@@ -541,12 +562,31 @@ export async function startTspBridge(
 
   const transport = new Libp2pTransport(node);
 
-  transport.onMessage(async (message: Uint8Array, fromAddr: TransportAddress) => {
+  /**
+   * Handle one inbound TSP frame.
+   *
+   * Extracted from the `onMessage` registration below so that registration can
+   * hold ONE error boundary around the whole thing: the transport dispatches
+   * this handler FIRE-AND-FORGET (Libp2pTransport.dispatchMessage()), so any
+   * rejection that escapes here is an unhandled rejection — and under Node's
+   * default `--unhandled-rejections=throw`, a fatal error.
+   */
+  const handleInboundMessage = async (
+    message: Uint8Array,
+    fromAddr: TransportAddress,
+  ): Promise<void> => {
     console.log(`[tsp-bridge] ← inbound message peerId=${fromAddr.peerId.slice(0, 12)}... msgLen=${message.length}`);
     // ── Step 1: Try to detect TSP handshake messages (RFI/RFA) ──────────
     if (serverIdentity) {
+      // Distinguishes "this frame is not a CESR TSP envelope" (fall through to the
+      // JSON path below) from "this frame IS one and handling it failed" (drop it).
+      // Conflating the two is what made a DB failure fatal: the catch fell through
+      // to the JSON fallback, which re-ran the same failing DB call on the one line
+      // of this handler that had no error boundary.
+      let isCesrEnvelope = false;
       try {
         const peek = peekEnvelope(message);
+        isCesrEnvelope = true;
         console.log(`[tsp-bridge] peekEnvelope: type=${peek.payloadType} vidSender=${peek.vidSender.slice(0, 12)}...`);
 
         // Record the sender's live libp2p endpoint on EVERY inbound message.
@@ -747,13 +787,39 @@ export async function startTspBridge(
           return;
         }
       } catch (err) {
+        if (isCesrEnvelope) {
+          // The envelope PARSED, so the failure is DOWNSTREAM of framing — a DB or
+          // routing error, not a CESR mismatch. Re-routing the same bytes down the
+          // JSON path re-ran the same failing DB call on an unguarded line, which
+          // is exactly how a transient tserver stall terminated the server on
+          // 2026-10-29. Drop the frame; the sender's delivery queue retries it.
+          console.error(
+            `[tsp-bridge] TSP envelope handling failed (message dropped): ${(err as Error)?.message ?? err}`,
+          );
+          return;
+        }
         console.log(`[tsp-bridge] peekEnvelope failed (not CESR?): ${(err as Error)?.message ?? err}`);
-        // Not a CESR TSP message — fall through
+        // Genuinely not a CESR TSP message — fall through to the JSON path.
       }
     }
 
     // ── Step 2: Try JSON protocol messages (non-CESR, direct JSON) ─────
     await routeProtocolMessage(db, transport, fromAddr, message, '' as Vid, inboundTx);
+  };
+
+  transport.onMessage(async (message: Uint8Array, fromAddr: TransportAddress) => {
+    // One error boundary for every path above. The transport calls this
+    // fire-and-forget, so anything that escapes becomes an unhandled rejection —
+    // fatal under Node's default. A transient DB failure must drop one frame,
+    // never the server.
+    try {
+      await handleInboundMessage(message, fromAddr);
+    } catch (err) {
+      console.error(
+        `[tsp-bridge] inbound message handler failed (message dropped) peerId=${fromAddr.peerId.slice(0, 12)}...: ` +
+        ((err as Error)?.message ?? String(err)),
+      );
+    }
   });
 
   await transport.start();

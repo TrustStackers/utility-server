@@ -14,7 +14,7 @@
  *      get the W3C JSON envelope, and the log endpoint returns JSONL.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/resolution/resolver-app.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/resolution/resolver-app.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

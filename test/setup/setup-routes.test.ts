@@ -308,3 +308,124 @@ test('setup/vtn resumes an existing namespace instead of dead-ending', async () 
   }
 });
 
+
+// ── Bootstrap address + peer ID (the network step's new fields) ────────────
+//
+// The wizard pre-fills both from this component's `.env` and lets the operator
+// accept or replace them. Empty is legitimate ("use the .env value"); malformed
+// is not — a bad peer ID otherwise surfaces much later as an opaque dial timeout.
+
+const VALID_PEER_ID = '12D3KooWKF2Tmh21NNSH5gWazfbmFEtTZS9XT1uXk8njFAy5jUda';
+
+test('setup network step accepts a replacement bootstrap host + peer ID', async () => {
+  const ds = makeTestDb();
+  const app = Fastify();
+  registerSetupRoutes(app, { getDb: () => ds });
+  tempDataDir();
+  try {
+    await app.inject({ method: 'POST', url: '/setup/reset' });
+    const r = await app.inject({
+      method: 'POST', url: '/setup/network',
+      payload: {
+        advertisedHost: '203.0.113.5',
+        httpPort: 8790,
+        libp2pPort: 4005,
+        bootstrapHost: 'bootstrap.example.com',
+        bootstrapPeerId: VALID_PEER_ID,
+      },
+    });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(r.json().network.bootstrapHost, 'bootstrap.example.com');
+    assert.equal(r.json().network.bootstrapPeerId, VALID_PEER_ID);
+  } finally {
+    await app.close();
+    await ds.close();
+    delete process.env.UTILITY_DATA_DIR;
+  }
+});
+
+test('setup network step accepts empty bootstrap fields (means "use the .env")', async () => {
+  const ds = makeTestDb();
+  const app = Fastify();
+  registerSetupRoutes(app, { getDb: () => ds });
+  tempDataDir();
+  try {
+    await app.inject({ method: 'POST', url: '/setup/reset' });
+    const r = await app.inject({
+      method: 'POST', url: '/setup/network',
+      payload: { advertisedHost: '203.0.113.5', httpPort: 8790, libp2pPort: 4005 },
+    });
+    assert.equal(r.statusCode, 200, r.body);
+    assert.equal(r.json().network.bootstrapHost, '');
+    assert.equal(r.json().network.bootstrapPeerId, '');
+  } finally {
+    await app.close();
+    await ds.close();
+    delete process.env.UTILITY_DATA_DIR;
+  }
+});
+
+test('setup network step rejects a malformed bootstrap peer ID', async () => {
+  const ds = makeTestDb();
+  const app = Fastify();
+  registerSetupRoutes(app, { getDb: () => ds });
+  tempDataDir();
+  try {
+    await app.inject({ method: 'POST', url: '/setup/reset' });
+    const r = await app.inject({
+      method: 'POST', url: '/setup/network',
+      payload: { bootstrapPeerId: 'not-a-peer-id' },
+    });
+    assert.equal(r.statusCode, 400, r.body);
+    assert.match(r.json().error, /Invalid bootstrap peer ID/);
+  } finally {
+    await app.close();
+    await ds.close();
+    delete process.env.UTILITY_DATA_DIR;
+  }
+});
+
+test('setup network step rejects a malformed bootstrap host', async () => {
+  const ds = makeTestDb();
+  const app = Fastify();
+  registerSetupRoutes(app, { getDb: () => ds });
+  tempDataDir();
+  try {
+    await app.inject({ method: 'POST', url: '/setup/reset' });
+    const r = await app.inject({
+      method: 'POST', url: '/setup/network',
+      payload: { bootstrapHost: 'http://bootstrap.example.com/path' },
+    });
+    assert.equal(r.statusCode, 400, r.body);
+    assert.match(r.json().error, /Invalid bootstrap host/);
+  } finally {
+    await app.close();
+    await ds.close();
+    delete process.env.UTILITY_DATA_DIR;
+  }
+});
+
+test('setup bootstrap endpoint reports the .env defaults (shape is stable either way)', async () => {
+  const ds = makeTestDb();
+  const app = Fastify();
+  registerSetupRoutes(app, { getDb: () => ds });
+  tempDataDir();
+  try {
+    const r = await app.inject({ method: 'GET', url: '/setup/bootstrap' });
+    assert.equal(r.statusCode, 200, r.body);
+    const d = r.json();
+    // Whether or not this checkout has a utility-server/.env, the wizard needs a
+    // stable shape to pre-fill from: it must never throw, and must never return
+    // undefined for the fields the form binds to.
+    assert.equal(typeof d.available, 'boolean');
+    assert.equal(typeof d.host, 'string');
+    assert.equal(typeof d.peerId, 'string');
+    assert.equal(typeof d.tcpPort, 'number');
+    assert.equal(typeof d.wsPort, 'number');
+  } finally {
+    await app.close();
+    await ds.close();
+    delete process.env.UTILITY_DATA_DIR;
+  }
+});
+

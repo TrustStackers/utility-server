@@ -20,7 +20,7 @@
  *      the same op sent as an *operation* is refused rather than run as an empty tx.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/tx/namespace-info-query.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/tx/namespace-info-query.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

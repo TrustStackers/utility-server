@@ -8,7 +8,10 @@
  */
 
 import type { FastifyInstance } from 'fastify';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { DataSource } from '@p2p-trust-stack/core/db/data-source.js';
+import { loadBootstrapClientEnv } from '@p2p-trust-stack/core/config/bootstrap-env.js';
 import { createSetupState, type SetupState, buildSetupConfig, saveSetupConfig, isConfigured } from './setup-state.js';
 import {
   listLocalFounderVtas,
@@ -25,6 +28,35 @@ import * as identitiesRepo from '@p2p-trust-stack/core/db/repositories/identitie
 import * as membershipsRepo from '@p2p-trust-stack/core/db/repositories/memberships-repo.js';
 
 let state: SetupState = createSetupState();
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** `utility-server/.env` — the same file index.ts reads at boot. */
+function componentEnvPath(): string {
+  return join(__dirname, '..', '..', '.env');
+}
+
+/**
+ * A bootstrap host is a DNS name or an IP literal — anything with whitespace or
+ * a scheme is a paste mistake, and `/` would corrupt the multiaddr built from it.
+ */
+function isValidBootstrapHost(host: string): boolean {
+  if (!host) return true; // empty = "use the .env value"
+  if (host.length > 253) return false;
+  if (/[\s/\\?#@]/.test(host)) return false;
+  return /^[A-Za-z0-9._:-]+$/.test(host);
+}
+
+/**
+ * A libp2p peer ID is base58btc (`12D3KooW…`) — no `0`, `O`, `I`, or `l`. Checked
+ * loosely on length + alphabet: a wrong peer ID means every dial goes to the
+ * wrong identity, and the failure mode (a timeout) is otherwise undiagnosable.
+ */
+function isValidPeerId(peerId: string): boolean {
+  if (!peerId) return true; // empty = "use the .env value"
+  if (peerId.length < 40 || peerId.length > 128) return false;
+  return /^[1-9A-HJ-NP-Za-km-z]+$/.test(peerId);
+}
 
 // ── Setup-complete guard (F-06 / SYN-014) ─────────────────────────────
 //
@@ -102,6 +134,35 @@ function registerSetupRouteHandlers(app: FastifyInstance, deps: SetupRoutesDeps)
     }
   });
 
+  // Bootstrap defaults for the network step.
+  //
+  // Pre-filled from this component's `.env` (the block `npm run init:bootstrap`
+  // writes), so the operator can ACCEPT the default or replace it in the wizard
+  // without editing a file. A missing/invalid `.env` is NOT an error here: the
+  // server would simply run in LAN-only mode, and the wizard must stay reachable
+  // so setup can still be completed.
+  app.get('/setup/bootstrap', async (_req, reply) => {
+    try {
+      const env = loadBootstrapClientEnv({ path: componentEnvPath() });
+      return reply.send({
+        available: true,
+        host: env.host,
+        peerId: env.peerId,
+        tcpPort: env.tcpPort,
+        wsPort: env.wsPort,
+      });
+    } catch (err) {
+      return reply.send({
+        available: false,
+        host: '',
+        peerId: '',
+        tcpPort: 4001,
+        wsPort: 4002,
+        message: (err as Error).message,
+      });
+    }
+  });
+
   // Step 1 — mode selection.
   app.post<{ Body: { mode?: string } }>('/setup/mode', async (req, reply) =>
     withSetupLock(async () => {
@@ -117,16 +178,44 @@ function registerSetupRouteHandlers(app: FastifyInstance, deps: SetupRoutesDeps)
     }),
   );
 
-  // Step 2 — network / advertised IP.
-  app.post<{ Body: { advertisedHost?: string; httpPort?: number; libp2pPort?: number } }>(
+  // Step 2 — network / advertised IP + which bootstrap server to register with.
+  app.post<{
+    Body: {
+      advertisedHost?: string;
+      httpPort?: number;
+      libp2pPort?: number;
+      bootstrapHost?: string;
+      bootstrapPeerId?: string;
+    };
+  }>(
     '/setup/network',
     async (req, reply) =>
       withSetupLock(async () => {
         if (setupClosed()) return reply.code(409).send(SETUP_CLOSED);
+
+        // The two bootstrap fields are pre-filled from `.env` and may be accepted
+        // as-is or replaced. Empty is legitimate (it means "use the .env value"),
+        // but a malformed value is not — a bad peer ID fails as an opaque dial
+        // timeout much later, so it is rejected here where it can be explained.
+        const bootstrapHost = req.body?.bootstrapHost?.trim() ?? '';
+        const bootstrapPeerId = req.body?.bootstrapPeerId?.trim() ?? '';
+        if (!isValidBootstrapHost(bootstrapHost)) {
+          return reply.code(400).send({
+            error: `Invalid bootstrap host "${bootstrapHost}" — use a DNS name or an IP address.`,
+          });
+        }
+        if (!isValidPeerId(bootstrapPeerId)) {
+          return reply.code(400).send({
+            error: 'Invalid bootstrap peer ID — expected a base58btc libp2p peer ID (12D3Koo…).',
+          });
+        }
+
         state.network = {
           advertisedHost: req.body?.advertisedHost ?? '127.0.0.1',
           httpPort: req.body?.httpPort ?? 8787,
           libp2pPort: req.body?.libp2pPort ?? 4003,
+          bootstrapHost,
+          bootstrapPeerId,
         };
         state.currentStep = 2;
         return reply.send({ ok: true, step: state.currentStep, network: state.network });

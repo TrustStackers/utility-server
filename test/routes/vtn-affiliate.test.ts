@@ -18,7 +18,7 @@
  * tests assert the documented contract, which is what exposed it.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/routes/vtn-affiliate.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/routes/vtn-affiliate.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

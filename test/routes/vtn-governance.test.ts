@@ -10,7 +10,7 @@
  * come from the admins' agent apps.
  *
  * Run:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs \
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs \
  *     --test test/routes/vtn-governance.test.ts
  */
 import { test } from 'node:test';

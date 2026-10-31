@@ -34,7 +34,7 @@
     "@libp2p/websockets": "^10.1.16",
     "@multiformats/multiaddr": "^13.0.3",
     "@node-rs/argon2": "^2.0.2",
-    "@p2p-trust-stack/core": "^0.1.0",
+    "@p2p-trust-stack/core": "0.2.0",
     "@types/pg": "^8.20.4",
     "@types/uuid": "^10.0.0",
     "cytoscape": "^3.30.3",

@@ -20,7 +20,7 @@
  * `fix: true`, leave the report-only shapes untouched, and be idempotent.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/node/reconcile-identities.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/node/reconcile-identities.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

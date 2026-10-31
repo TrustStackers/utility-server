@@ -12,7 +12,7 @@
  * signature, with no secret-dependent branch to make constant-time.)
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/services/session.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/services/session.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

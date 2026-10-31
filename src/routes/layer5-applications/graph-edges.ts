@@ -49,6 +49,8 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import * as credentialsRepo from '@p2p-trust-stack/core/db/repositories/credentials-repo.js';
 import * as delegationsRepo from '@p2p-trust-stack/core/db/repositories/delegations-repo.js';
 
+import { getNamespaceConfig } from '../../services/namespace-service.js';
+
 interface GraphEdgesQuery {
   identityUuid?: string;
   format?: string;
@@ -62,7 +64,7 @@ interface GraphMember {
 
 interface GraphNode {
   id: string;           // canonical identity uuid
-  label: string;
+  label: string;        // display name; the utility-server/VTN node also carries its VTN key
   role: string;
   subjectKind: string;
   identityUuid: string;
@@ -173,6 +175,25 @@ async function buildCanonicalizationMap(db: DataSource): Promise<{
 
 function resolveUuid(canonicalize: Map<string, string>, uuid: string): string {
   return canonicalize.get(uuid) ?? uuid;
+}
+
+/**
+ * Append the VTN key to a display label: `utility-server` → `utility-server (p2pts)`.
+ *
+ * The parenthetical value is the VTN **key** (the namespace the operator set
+ * during setup, e.g. `p2pts` / `fpndtg`) — the identifier agents match on to
+ * find this server, and the one the bootstrap dashboard already renders as
+ * `Utl Server (p2pts)`. It is a label suffix, not a second source of truth.
+ *
+ * Idempotent: a label that already names the key (equal to it, or already
+ * carrying `(key)`) is left alone, so a VTN whose configured name IS the key
+ * does not read `p2pts (p2pts)`.
+ */
+function withVtnKey(label: string, vtnKey: string | null | undefined): string {
+  const key = (vtnKey ?? '').trim();
+  if (!key || !label) return label;
+  if (label === key || label.endsWith(`(${key})`)) return label;
+  return `${label} (${key})`;
 }
 
 export function registerGraphEdgesRoute(app: FastifyInstance, db: DataSource): void {
@@ -294,15 +315,42 @@ async function sendGraphFormat(db: DataSource, reply: FastifyReply) {
     membersByCommunity.set(community, list);
   }
 
+  // ── The served VTN key (`p2pts`, `fpndtg`) ──
+  // Used to name the network on the utility-server/VTN node labels below.
+  // Best-effort by design: `namespace_config` is a utility-server-only table
+  // (the core SQLite schema this route's tests migrate deliberately omits it),
+  // and a server that has not completed setup has no key at all — in both cases
+  // the graph still renders, just with the plain labels it always had.
+  let vtnKey: string | null = null;
+  let namespaceVtnUuid: string | null = null;
+  try {
+    const ns = await getNamespaceConfig(db);
+    vtnKey = ns?.namespace ?? null;
+    namespaceVtnUuid = ns?.vtnIdentityUuid ?? null;
+  } catch { /* best-effort — see above */ }
+
   const nodes: GraphNode[] = [];
   for (const uuid of nodeUuids) {
     const meta = metaByUuid.get(uuid);
     const role = meta?.role ?? 'vta';
+    const subjectKind = meta?.subjectKind ?? 'human';
+    // The utility server appears in two shapes on this graph: the namespace
+    // VTN identity created during setup (`role='vtn'`) and the server's own
+    // organization VTA (`role='vta'`, `subject_kind='organization'`). Both
+    // labels carry the VTN key so the graph names the NETWORK this node serves
+    // (`utility-server (p2pts)`) — the identifier agents match on — instead of
+    // just the process. Every other node is labelled exactly as before.
+    const label = withVtnKey(
+      meta?.name || `#${uuid.slice(0, 8)}`,
+      uuid === namespaceVtnUuid || (role === 'vta' && subjectKind === 'organization')
+        ? vtnKey
+        : null,
+    );
     nodes.push({
       id: uuid,
-      label: meta?.name || `#${uuid.slice(0, 8)}`,
+      label,
       role,
-      subjectKind: meta?.subjectKind ?? 'human',
+      subjectKind,
       identityUuid: uuid,
       did: meta?.did ?? null,
       members: role === 'vtc' ? (membersByCommunity.get(uuid) ?? []) : undefined,

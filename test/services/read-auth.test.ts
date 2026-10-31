@@ -14,7 +14,7 @@
  * about what the gate does — not about a helper's return value.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/services/read-auth.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/services/read-auth.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

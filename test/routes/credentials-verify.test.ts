@@ -13,7 +13,7 @@
  * simply is not on this node — opposite conclusions, one sentence.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/routes/credentials-verify.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/routes/credentials-verify.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

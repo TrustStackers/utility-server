@@ -20,7 +20,7 @@
  *                                      explained, not mistaken for a parse failure
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/routes/vtc-invite.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/routes/vtc-invite.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

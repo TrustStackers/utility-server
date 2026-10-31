@@ -12,7 +12,7 @@
  * impossible to trace through the log.
  *
  * Run with:
- *   cd utility-server && node --experimental-strip-types --loader ./test-loader.mjs --test test/tx/ceremony-invitation.test.ts
+ *   cd utility-server && node --experimental-strip-types --loader ../test-loader.mjs --test test/tx/ceremony-invitation.test.ts
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

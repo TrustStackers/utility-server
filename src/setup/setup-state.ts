@@ -40,12 +40,28 @@ export interface NetworkConfig {
   httpPort: number;
   /** libp2p/TSP node TCP port. */
   libp2pPort: number;
+  /**
+   * Bootstrap host this server dials — DNS name or fixed public IP.
+   *
+   * Pre-filled from `utility-server/.env` (the `init:bootstrap` block) and
+   * overridable here: a host may run several utility servers against different
+   * bootstrap servers without editing files. Empty means "use the `.env` value".
+   */
+  bootstrapHost: string;
+  /**
+   * Bootstrap peer ID to expect. This server is a CLIENT — it holds no seed — so
+   * the peer ID is the only copy of the bootstrap server's identity it has.
+   * Empty means "use the `.env` value".
+   */
+  bootstrapPeerId: string;
 }
 
 export const DEFAULT_NETWORK: NetworkConfig = {
   advertisedHost: '127.0.0.1',
   httpPort: 8787,
   libp2pPort: 4003,
+  bootstrapHost: '',
+  bootstrapPeerId: '',
 };
 
 /** The persisted `setup` block in data/config.json. */

@@ -34,9 +34,16 @@
     <input id="httpPort" type="number" value="8787">
     <label>libp2p / TSP port</label>
     <input id="libp2pPort" type="number" value="4003">
-    <label>Bootstrap Server Address</label>
-    <input id="bootstrapServerAddr" placeholder="set via `npm run init:bootstrap` (.env)">
-    <p class="note">The bootstrap/relay address and peer ID live in the component's .env — not hardcoded here.</p>
+
+    <h2 style="margin-top:1.25rem;">Bootstrap server</h2>
+    <p class="note">Which bootstrap/relay this server registers with. Both values are pre-filled
+      from <code>.env</code> — accept them as the default, or replace them to target a different
+      bootstrap server. This server is a client: it holds no seed, only the peer ID to expect.</p>
+    <label>Bootstrap host / IP address</label>
+    <input id="bootstrapServerAddr" placeholder="e.g. 203.0.113.5 or bootstrap.example.com">
+    <label>Bootstrap peer ID</label>
+    <input id="bootstrapPeerId" class="mono" placeholder="12D3KooW…">
+    <p class="note" id="bootstrapNote"></p>
     <button onclick="saveNetwork()">Continue</button>
   </div>
 
@@ -175,6 +182,8 @@ async function saveNetwork() {
     advertisedHost: document.getElementById('advertisedHost').value.trim(),
     httpPort: parseInt(document.getElementById('httpPort').value, 10),
     libp2pPort: parseInt(document.getElementById('libp2pPort').value, 10),
+    bootstrapHost: document.getElementById('bootstrapServerAddr').value.trim(),
+    bootstrapPeerId: document.getElementById('bootstrapPeerId').value.trim(),
   };
   const r = await fetch('/setup/network', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const d = await r.json();
@@ -183,6 +192,29 @@ async function saveNetwork() {
   show('identity');
   enterIdentityStep();
 }
+
+// Pre-fill the bootstrap fields from this component's `.env` (written by
+// `npm run init:bootstrap`). The operator can accept them as the default or
+// replace them — a host running several utility servers points each one at the
+// bootstrap server it should register with. Left empty, the server falls back to
+// `.env`; with neither, it runs in LAN-only mode.
+async function loadBootstrapDefaults() {
+  const note = document.getElementById('bootstrapNote');
+  try {
+    const r = await fetch('/setup/bootstrap');
+    const d = await r.json();
+    document.getElementById('bootstrapServerAddr').value = d.host || '';
+    document.getElementById('bootstrapPeerId').value = d.peerId || '';
+    note.textContent = d.available
+      ? 'Pre-filled from .env. Accept to use this bootstrap server, or replace both values.'
+      : 'No bootstrap .env found — ' + (d.message || 'leave blank to run in LAN-only mode') +
+        ' (you can still fill these in manually).';
+  } catch (e) {
+    note.textContent = 'Could not read the bootstrap defaults: ' + e.message;
+  }
+}
+
+loadBootstrapDefaults();
 
 // The row's third button ("Create founder VTA") is BOTH the way into the create form and
 // its submit action — the panel's own submit button was removed so there is exactly one
