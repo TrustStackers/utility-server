@@ -6,8 +6,8 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "start": "P2PTS_LOG_LEVEL=info node --experimental-strip-types --loader ./test-loader.mjs src/index.ts",
-    "dev": "P2PTS_LOG_LEVEL=info node --experimental-strip-types --loader ./test-loader.mjs --watch src/index.ts",
+    "start": "node --experimental-strip-types --loader ./test-loader.mjs src/index.ts",
+    "dev": "node --experimental-strip-types --loader ./test-loader.mjs --watch src/index.ts",
     "migrate": "node --experimental-strip-types --loader ./test-loader.mjs src/scripts/migrate.ts",
     "routes": "node --experimental-strip-types --loader ./test-loader.mjs src/scripts/list-routes.ts",
     "reconcile:identities": "node --experimental-strip-types --loader ./test-loader.mjs src/scripts/reconcile-identities.ts",
